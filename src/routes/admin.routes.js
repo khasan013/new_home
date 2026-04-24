@@ -153,7 +153,16 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const fullHome = await Home.findById(req.params.homeId)
       .populate('members.user', 'firstName lastName email isVerified');
 
-    const { totalEggPrice, totalEggCount, consumedEgg, otherCost, month } = req.body;
+    const {
+  totalEggPrice,
+  totalEggCount,
+  consumedEgg,
+  otherCost,
+  totalMeals,   // ✅ from frontend
+  totalBill,    // ✅ from frontend
+  perEgg,       // ✅ from frontend
+  month
+} = req.body;
 
     // ── Egg cost math ──────────────────────────────────
     const eggPrice   = Number(totalEggPrice) || 0;
@@ -161,13 +170,11 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const consumed   = Number(consumedEgg)   || 0;
     const other      = Number(otherCost)     || 0;
 
-    const perEgg          = eggPrice / eggCount;
-    const consumedCost    = consumed * perEgg;
-    const remainingEggCost = eggPrice - consumedCost;
-    const totalBill       = other + remainingEggCost;
-
     // ── Meal-based fair share ──────────────────────────
-    const meals = await Meal.find({ homeId: req.params.homeId })
+    const meals = await Meal.find({
+  homeId: req.params.homeId,
+  isPenalty: false   // 🔥 IMPORTANT
+})
       .populate('userId', 'firstName lastName email');
 
     const totalMeals = meals.reduce((s, m) => s + m.mealCount, 0);
