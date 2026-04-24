@@ -13,7 +13,7 @@ const isAdmin = (home, userId) => {
 };
 
 // ─────────────────────────────────────────
-// CREATE MEAL
+// CREATE MEAL (FIXED)
 // ─────────────────────────────────────────
 router.post('/:homeId', auth, async (req, res) => {
   try {
@@ -48,15 +48,29 @@ router.post('/:homeId', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
-    const meal = await Meal.create({
-      homeId,
-      userId: req.user.userId,
-      date,
-      mealCount: parseNumber(req.body.mealCount),
-      eggsCount: parseNumber(req.body.eggsCount),
-    });
+    // 🔥 IMPORTANT FIX (normalize date to match unique index)
+    date.setHours(0, 0, 0, 0);
 
-    // ✅ IMPORTANT: populate before sending
+    // 🔥 FIX: use UPSERT instead of create (prevents duplicate error)
+    const meal = await Meal.findOneAndUpdate(
+      {
+        homeId,
+        userId: req.user.userId,
+        date
+      },
+      {
+        $set: {
+          mealCount: parseNumber(req.body.mealCount),
+          eggsCount: parseNumber(req.body.eggsCount),
+        }
+      },
+      {
+        new: true,
+        upsert: true
+      }
+    );
+
+    // ✅ populate (same as your code)
     await meal.populate('userId', 'firstName email');
 
     res.json(meal);
@@ -69,6 +83,7 @@ router.post('/:homeId', auth, async (req, res) => {
     });
   }
 });
+
 
 // ─────────────────────────────────────────
 // GET MEALS
@@ -88,6 +103,7 @@ router.get('/:homeId', auth, async (req, res) => {
     });
   }
 });
+
 
 // ─────────────────────────────────────────
 // UPDATE (ADMIN ONLY)
@@ -113,7 +129,10 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
-    // ✅ FIX: only update provided fields (prevents overwrite bug)
+    if (date) {
+      date.setHours(0, 0, 0, 0); // 🔥 keep consistency
+    }
+
     const updateData = {};
 
     if (date) updateData.date = date;
@@ -131,7 +150,7 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       },
       updateData,
       { new: true }
-    ).populate('userId', 'firstName email'); // ✅ FIX: return populated data
+    ).populate('userId', 'firstName email');
 
     if (!meal) {
       return res.status(404).json({ message: 'Meal not found' });
@@ -147,6 +166,7 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
     });
   }
 });
+
 
 // ─────────────────────────────────────────
 // DELETE (ADMIN ONLY)
