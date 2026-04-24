@@ -30,6 +30,17 @@ const mealSchema = new mongoose.Schema({
     type: Number,
     default: 0,
     min: 0
+  },
+
+  // 🔥 FIX: add penalty support (THIS WAS MISSING)
+  isPenalty: {
+    type: Boolean,
+    default: false
+  },
+
+  penaltyReason: {
+    type: String,
+    default: ''
   }
 
 }, { timestamps: true });
