@@ -1,129 +1,132 @@
-// routes/meal.routes.js
 const express = require('express');
-const Meal    = require('../models/Meal');
-const Home    = require('../models/Home'); // ✅ ADD THIS
-const auth    = require('../middleware/auth');
+const Meal = require('../models/Meal');
+const Home = require('../models/Home'); // ✅ ADD THIS
+const auth = require('../middleware/auth');
 
 const router = express.Router();
 
-// =====================================================
-// HELPER: CHECK ADMIN
-// =====================================================
-const isAdmin = async (userId, homeId) => {
-  const home = await Home.findById(homeId);
-  if (!home) return false;
-
-  const member = home.members.find(
-    (m) => m.user.toString() === userId
+// ✅ Helper: check admin
+const isAdmin = (home, userId) => {
+  return home.members.some(
+    (m) => m.user.toString() === userId && m.role === 'admin'
   );
-
-  return member?.role === 'admin';
 };
 
-// =====================================================
-// CREATE (ANY USER)
-// =====================================================
+// ─────────────────────────────────────────
+// CREATE (ALL USERS)
+// ─────────────────────────────────────────
 router.post('/:homeId', auth, async (req, res) => {
   try {
     const meal = await Meal.create({
-      homeId:    req.params.homeId,
-      userId:    req.user.userId,
-      date:      req.body.date,
-      mealCount: req.body.mealCount,
-      eggsCount: req.body.eggsCount,
+      homeId: req.params.homeId,
+      userId: req.user.userId,
+
+      // ✅ FIX
+      date: req.body.date ? new Date(req.body.date) : new Date(),
+
+      mealCount: Number(req.body.mealCount) || 0,
+      eggsCount: Number(req.body.eggsCount) || 0,
     });
 
-    // ✅ populate user name for frontend
-    const populated = await Meal.findById(meal._id)
-      .populate('userId', 'firstName');
-
-    res.json(populated);
+    res.json(meal);
 
   } catch (err) {
-    res.status(500).json({ message: 'Failed to create meal', error: err.message });
+    console.error('CREATE MEAL ERROR:', err);
+    res.status(500).json({
+      message: 'Failed to create meal',
+      error: err.message
+    });
   }
 });
 
-// =====================================================
-// GET ALL
-// =====================================================
+// ─────────────────────────────────────────
+// GET (IMPORTANT: populate user)
+// ─────────────────────────────────────────
 router.get('/:homeId', auth, async (req, res) => {
   try {
     const meals = await Meal.find({ homeId: req.params.homeId })
-      .populate('userId', 'firstName') // ✅ ADD THIS
+      .populate('userId', 'firstName email') // ✅ FIX
       .sort({ date: -1 });
 
     res.json(meals);
 
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch meals', error: err.message });
+    res.status(500).json({
+      message: 'Failed to fetch meals',
+      error: err.message
+    });
   }
 });
 
-// =====================================================
-// UPDATE (ADMIN OR OWNER)
-// =====================================================
+// ─────────────────────────────────────────
+// UPDATE (ADMIN ONLY)
+// ─────────────────────────────────────────
 router.put('/:homeId/:mealId', auth, async (req, res) => {
   try {
-    const isUserAdmin = await isAdmin(req.user.userId, req.params.homeId);
+    const home = await Home.findById(req.params.homeId);
 
-    let meal;
-
-    if (isUserAdmin) {
-      // ✅ ADMIN can update any
-      meal = await Meal.findOneAndUpdate(
-        { _id: req.params.mealId, homeId: req.params.homeId },
-        { date: req.body.date, mealCount: req.body.mealCount, eggsCount: req.body.eggsCount },
-        { new: true }
-      );
-    } else {
-      // ✅ USER can update only own
-      meal = await Meal.findOneAndUpdate(
-        { _id: req.params.mealId, homeId: req.params.homeId, userId: req.user.userId },
-        { date: req.body.date, mealCount: req.body.mealCount, eggsCount: req.body.eggsCount },
-        { new: true }
-      );
+    if (!home || !isAdmin(home, req.user.userId)) {
+      return res.status(403).json({
+        message: 'Only admin can edit meals'
+      });
     }
 
-    if (!meal) return res.status(404).json({ message: 'Meal not found' });
+    const meal = await Meal.findOneAndUpdate(
+      {
+        _id: req.params.mealId,
+        homeId: req.params.homeId
+      },
+      {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        mealCount: Number(req.body.mealCount) || 0,
+        eggsCount: Number(req.body.eggsCount) || 0,
+      },
+      { new: true }
+    );
+
+    if (!meal) {
+      return res.status(404).json({ message: 'Meal not found' });
+    }
 
     res.json(meal);
 
   } catch (err) {
-    res.status(500).json({ message: 'Failed to update meal', error: err.message });
+    res.status(500).json({
+      message: 'Failed to update meal',
+      error: err.message
+    });
   }
 });
 
-// =====================================================
-// DELETE (ADMIN OR OWNER)
-// =====================================================
+// ─────────────────────────────────────────
+// DELETE (ADMIN ONLY)
+// ─────────────────────────────────────────
 router.delete('/:homeId/:mealId', auth, async (req, res) => {
   try {
-    const isUserAdmin = await isAdmin(req.user.userId, req.params.homeId);
+    const home = await Home.findById(req.params.homeId);
 
-    let meal;
-
-    if (isUserAdmin) {
-      // ✅ ADMIN can delete any
-      meal = await Meal.findOneAndDelete({
-        _id: req.params.mealId,
-        homeId: req.params.homeId
-      });
-    } else {
-      // ✅ USER can delete only own
-      meal = await Meal.findOneAndDelete({
-        _id: req.params.mealId,
-        homeId: req.params.homeId,
-        userId: req.user.userId
+    if (!home || !isAdmin(home, req.user.userId)) {
+      return res.status(403).json({
+        message: 'Only admin can delete meals'
       });
     }
 
-    if (!meal) return res.status(404).json({ message: 'Meal not found' });
+    const meal = await Meal.findOneAndDelete({
+      _id: req.params.mealId,
+      homeId: req.params.homeId
+    });
+
+    if (!meal) {
+      return res.status(404).json({ message: 'Meal not found' });
+    }
 
     res.json({ message: 'Deleted' });
 
   } catch (err) {
-    res.status(500).json({ message: 'Failed to delete meal', error: err.message });
+    res.status(500).json({
+      message: 'Failed to delete meal',
+      error: err.message
+    });
   }
 });
 
