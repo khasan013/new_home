@@ -23,33 +23,26 @@ const mealSchema = new mongoose.Schema({
   mealCount: {
     type: Number,
     default: 0,
-    min: 0,
-    validate: {
-      validator: Number.isFinite,
-      message: 'mealCount must be a valid number'
-    }
+    min: 0
   },
 
   eggsCount: {
     type: Number,
     default: 0,
-    min: 0,
-    validate: {
-      validator: Number.isFinite,
-      message: 'eggsCount must be a valid number'
-    }
+    min: 0
   }
 
 }, { timestamps: true });
 
-// Normalize date
-mealSchema.pre('save', function(next) {
+// ✅ FIXED PRE SAVE HOOK (NO next)
+mealSchema.pre('save', function () {
   if (this.date) {
     const d = new Date(this.date);
     d.setHours(0, 0, 0, 0);
     this.date = d;
   }
-  next();
 });
+
+mealSchema.index({ homeId: 1, date: 1 });
 
 module.exports = mongoose.model('Meal', mealSchema);
