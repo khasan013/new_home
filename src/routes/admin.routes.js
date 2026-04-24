@@ -86,39 +86,46 @@ router.get('/:homeId/penalties', auth, async (req, res) => {
 //         user's effective meal count goes up (they owe more).
 router.post('/:homeId/penalties', auth, async (req, res) => {
   try {
-    await requireAdmin(req.params.homeId, req.user.userId);
+    const { userId, meals, reason, injectMeal } = req.body;
 
-    const { userId, meals, reason } = req.body;
     if (!userId || !meals) {
-      return res.status(400).json({ message: 'userId and meals are required' });
+      return res.status(400).json({ message: 'User and meals are required' });
     }
 
-    const penaltyMeals = Math.abs(Number(meals));
+    const penaltyMeals = Number(meals);
 
-    // 1. Save penalty record
+    // ✅ 1. Save penalty (MAIN RECORD)
     const penalty = await Penalty.create({
       homeId: req.params.homeId,
       userId,
       amount: penaltyMeals,
-      reason: reason || `Penalty – ${penaltyMeals} meals`,
+      reason: reason || '',
     });
 
-    // 2. Inject a meal entry so it counts in bill calculation
-    //    mealCount is positive so totalMeals increases → user pays more
-    await Meal.create({
-      homeId: req.params.homeId,
-      userId,
-      date: new Date(),
-      mealCount: penaltyMeals,
-      eggsCount: 0,
-      isPenalty: true,          // flag for display purposes
-      penaltyReason: reason || `Penalty`,
-    });
+    // ✅ 2. OPTIONAL meal injection (FIXED)
+    if (injectMeal !== false) {
+      await Meal.create({
+        homeId: req.params.homeId,
+        userId,
+        date: new Date(),
+        mealCount: penaltyMeals,
+        eggsCount: 0,
+        isPenalty: true,
+        penaltyReason: reason || 'Penalty',
+      });
+    }
 
+    // ✅ 3. populate user for frontend
     const populated = await penalty.populate('userId', 'firstName lastName email');
+
     res.json(populated);
+
   } catch (err) {
-    res.status(err.status || 500).json({ message: err.message });
+    console.error('❌ Penalty error:', err); // 🔥 VERY IMPORTANT for debugging
+    res.status(500).json({
+      message: 'Failed to add penalty',
+      error: err.message
+    });
   }
 });
 
