@@ -25,6 +25,7 @@ app.use('/api/meal',    require('./routes/meal.routes'));
 app.use('/api/expense', require('./routes/expense.routes'));
 app.use('/api/report',  require('./routes/report.routes'));
 app.use('/api/admin',   require('./routes/admin.routes'));
+app.use('/api/cron', require('./routes/cron.routes'));
 
 
 // ── Health check ───────────────────────────────────────
