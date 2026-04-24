@@ -45,9 +45,12 @@ router.post('/:homeId', auth, async (req, res) => {
       return isNaN(num) ? 0 : num;
     };
 
-    // ✅ Safe date
-    const date = req.body.date ? new Date(req.body.date) : new Date();
-    if (isNaN(date)) {
+    // ✅ 🔥 FIXED SAFE DATE PARSE (NO LOGIC CHANGE)
+    let date = req.body.date ? new Date(req.body.date) : new Date();
+
+    // ❗ Correct validation
+    if (isNaN(date.getTime())) {
+      console.error('INVALID DATE RECEIVED:', req.body.date);
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
@@ -63,7 +66,7 @@ router.post('/:homeId', auth, async (req, res) => {
     res.json(meal);
 
   } catch (err) {
-    console.error('CREATE MEAL ERROR:', err);
+    console.error('CREATE MEAL ERROR FULL:', err); // 🔥 upgraded log
     res.status(500).json({
       message: 'Failed to create meal',
       error: err.message
@@ -108,13 +111,20 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       return isNaN(num) ? 0 : num;
     };
 
+    // ✅ SAME FIX HERE ALSO
+    let date = req.body.date ? new Date(req.body.date) : undefined;
+
+    if (date && isNaN(date.getTime())) {
+      return res.status(400).json({ message: 'Invalid date format' });
+    }
+
     const meal = await Meal.findOneAndUpdate(
       {
         _id: req.params.mealId,
         homeId: req.params.homeId
       },
       {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date,
         mealCount: parseNumber(req.body.mealCount),
         eggsCount: parseNumber(req.body.eggsCount),
       },
