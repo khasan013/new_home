@@ -21,13 +21,11 @@ router.post('/:homeId', auth, async (req, res) => {
 
     console.log('REQ BODY:', req.body);
 
-    // ✅ Check home exists
     const home = await Home.findById(homeId);
     if (!home) {
       return res.status(404).json({ message: 'Home not found' });
     }
 
-    // ✅ Check membership
     const isMember = home.members.some(
       (m) => m.user.toString() === req.user.userId
     );
@@ -38,23 +36,18 @@ router.post('/:homeId', auth, async (req, res) => {
       });
     }
 
-    // ✅ Safe number parser
     const parseNumber = (val) => {
       if (val === undefined || val === null) return 0;
       const num = Number(val);
       return isNaN(num) ? 0 : num;
     };
 
-    // ✅ 🔥 FIXED SAFE DATE PARSE (NO LOGIC CHANGE)
     let date = req.body.date ? new Date(req.body.date) : new Date();
 
-    // ❗ Correct validation
     if (isNaN(date.getTime())) {
-      console.error('INVALID DATE RECEIVED:', req.body.date);
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
-    // ✅ Create meal
     const meal = await Meal.create({
       homeId,
       userId: req.user.userId,
@@ -63,10 +56,13 @@ router.post('/:homeId', auth, async (req, res) => {
       eggsCount: parseNumber(req.body.eggsCount),
     });
 
+    // ✅ IMPORTANT: populate before sending
+    await meal.populate('userId', 'firstName email');
+
     res.json(meal);
 
   } catch (err) {
-    console.error('CREATE MEAL ERROR FULL:', err); // 🔥 upgraded log
+    console.error('CREATE MEAL ERROR FULL:', err);
     res.status(500).json({
       message: 'Failed to create meal',
       error: err.message
@@ -111,11 +107,21 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       return isNaN(num) ? 0 : num;
     };
 
-    // ✅ SAME FIX HERE ALSO
     let date = req.body.date ? new Date(req.body.date) : undefined;
 
     if (date && isNaN(date.getTime())) {
       return res.status(400).json({ message: 'Invalid date format' });
+    }
+
+    // ✅ FIX: only update provided fields (prevents overwrite bug)
+    const updateData = {};
+
+    if (date) updateData.date = date;
+    if (req.body.mealCount !== undefined) {
+      updateData.mealCount = parseNumber(req.body.mealCount);
+    }
+    if (req.body.eggsCount !== undefined) {
+      updateData.eggsCount = parseNumber(req.body.eggsCount);
     }
 
     const meal = await Meal.findOneAndUpdate(
@@ -123,13 +129,9 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
         _id: req.params.mealId,
         homeId: req.params.homeId
       },
-      {
-        date,
-        mealCount: parseNumber(req.body.mealCount),
-        eggsCount: parseNumber(req.body.eggsCount),
-      },
+      updateData,
       { new: true }
-    );
+    ).populate('userId', 'firstName email'); // ✅ FIX: return populated data
 
     if (!meal) {
       return res.status(404).json({ message: 'Meal not found' });
