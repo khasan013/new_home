@@ -1,6 +1,7 @@
 const express = require('express');
 const Meal = require('../models/Meal');
 const Expense = require('../models/Expense');
+const Penalty = require('../models/Penalty'); // 🔥 ADD THIS
 
 const router = express.Router();
 
@@ -12,8 +13,9 @@ router.get('/reset-month', async (req, res) => {
     // ⚠️ OPTION 1 (your current system)
     await Meal.deleteMany({});
     await Expense.deleteMany({});
+    await Penalty.deleteMany({}); // 🔥 FIX: reset penalties also
 
-    res.json({ message: 'Monthly reset done ✅' });
+    res.json({ message: 'Monthly reset done ✅ (Meals + Expenses + Penalties)' });
 
   } catch (err) {
     console.error(err);
