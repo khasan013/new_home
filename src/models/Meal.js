@@ -32,7 +32,7 @@ const mealSchema = new mongoose.Schema({
     min: 0
   },
 
-  // 🔥 FIX: add penalty support (THIS WAS MISSING)
+  // 🔥 Penalty support
   isPenalty: {
     type: Boolean,
     default: false
@@ -46,7 +46,7 @@ const mealSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 
-// 🔥 Normalize date (works for BOTH save + update)
+// 🔥 Normalize date (for save)
 function normalizeDate(next) {
   if (this.date) {
     const d = new Date(this.date);
@@ -59,17 +59,16 @@ function normalizeDate(next) {
 // ✅ Apply to create
 mealSchema.pre('save', normalizeDate);
 
-// ✅ Apply to update (VERY IMPORTANT)
-mealSchema.pre('findOneAndUpdate', function (next) {
+
+// ✅ FIXED: Apply to update (NO next)
+mealSchema.pre('findOneAndUpdate', function () {
   const update = this.getUpdate();
 
-  if (update.date) {
+  if (update && update.date) {
     const d = new Date(update.date);
     d.setHours(0, 0, 0, 0);
     update.date = d;
   }
-
-  next();
 });
 
 
