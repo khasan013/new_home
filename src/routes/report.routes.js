@@ -1,19 +1,19 @@
-const express = require('express'); // ✅ FIX: was missing
-const Meal = require('../models/Meal');
+// routes/report.routes.js
+const express = require('express');
+const Meal    = require('../models/Meal');
 const Expense = require('../models/Expense');
-const auth = require('../middleware/auth');
+const auth    = require('../middleware/auth');
 
 const router = express.Router();
 
 router.get('/:homeId', auth, async (req, res) => {
-  try { // ✅ FIX: added try/catch
-    const meals = await Meal.find({ homeId: req.params.homeId });
+  try {
+    const meals    = await Meal.find({ homeId: req.params.homeId });
     const expenses = await Expense.find({ homeId: req.params.homeId });
 
     const totalExpense = expenses.reduce((sum, e) => sum + e.amount, 0);
-    const totalMeals = meals.reduce((sum, m) => sum + m.mealCount, 0);
-
-    const perMeal = totalMeals ? totalExpense / totalMeals : 0;
+    const totalMeals   = meals.reduce((sum, m) => sum + m.mealCount, 0);
+    const perMeal      = totalMeals ? totalExpense / totalMeals : 0;
 
     res.json({ totalExpense, totalMeals, perMeal });
   } catch (err) {
