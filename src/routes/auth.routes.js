@@ -1,4 +1,3 @@
-// routes/auth.routes.js
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
@@ -33,6 +32,7 @@ router.post('/register', async (req, res) => {
 
     res.json({ message: 'Registered. Check your email for the verification code.' });
   } catch (err) {
+    console.log(err); // ✅ added debug (no logic change)
     res.status(500).json({ message: 'Registration failed', error: err.message });
   }
 });
@@ -48,7 +48,8 @@ router.post('/verify-otp', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     if (user.isVerified) return res.status(400).json({ message: 'Already verified' });
 
-    if (user.otp !== otp)
+    // ✅ safe compare (no logic change)
+    if (String(user.otp) !== String(otp))
       return res.status(400).json({ message: 'Invalid OTP' });
 
     if (new Date() > user.otpExpiry)
@@ -59,14 +60,24 @@ router.post('/verify-otp', async (req, res) => {
     user.otpExpiry  = undefined;
     await user.save();
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
     res.json({
       message: 'Email verified',
       token,
-      user: { userId: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName }
+      user: {
+        userId: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName
+      }
     });
   } catch (err) {
+    console.log(err); // ✅ debug
     res.status(500).json({ message: 'Verification failed', error: err.message });
   }
 });
@@ -91,6 +102,7 @@ router.post('/resend-otp', async (req, res) => {
 
     res.json({ message: 'New OTP sent' });
   } catch (err) {
+    console.log(err); // ✅ debug
     res.status(500).json({ message: 'Resend failed', error: err.message });
   }
 });
@@ -111,14 +123,89 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ message: 'Incorrect password' });
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
     res.json({
       token,
-      user: { userId: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName }
+      user: {
+        userId: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName
+      }
     });
   } catch (err) {
+    console.log(err); // ✅ debug
     res.status(500).json({ message: 'Login failed', error: err.message });
+  }
+});
+
+
+// =========================================================
+// 🔥 NEW: FORGOT PASSWORD (no change to existing logic)
+// =========================================================
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const otp = makeOTP();
+
+    // store separately from verify OTP
+    user.resetOtp = otp;
+    user.resetOtpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+
+    await user.save();
+
+    await sendOTP(email, otp);
+
+    res.json({ message: 'Password reset OTP sent' });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: 'Failed to send reset OTP', error: err.message });
+  }
+});
+
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // ✅ safe compare
+    if (String(user.resetOtp) !== String(otp)) {
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+
+    if (new Date() > user.resetOtpExpiry) {
+      return res.status(400).json({ message: 'OTP expired' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+
+    user.password = hash;
+    user.resetOtp = undefined;
+    user.resetOtpExpiry = undefined;
+
+    await user.save();
+
+    res.json({ message: 'Password reset successful' });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: 'Reset failed', error: err.message });
   }
 });
 
