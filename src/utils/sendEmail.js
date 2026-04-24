@@ -1,20 +1,21 @@
-import nodemailer from "nodemailer";
+const nodemailer = require("nodemailer");
 
-export const sendEmail = async (to, subject, text) => {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // app password
-    },
-  });
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
-  const mailOptions = {
-    from: `"Meal App" <${process.env.EMAIL_USER}>`,
+// ✅ OTP-specific function (matches your route)
+const sendOTP = async (to, otp) => {
+  await transporter.sendMail({
+    from: `Meal App <${process.env.EMAIL_USER}>`,
     to,
-    subject,
-    text,
-  };
-
-  await transporter.sendMail(mailOptions);
+    subject: "Your OTP Code",
+    text: `Your OTP is ${otp}`,
+  });
 };
+
+module.exports = { sendOTP };
