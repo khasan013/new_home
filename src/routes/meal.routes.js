@@ -13,19 +13,21 @@ const isAdmin = (home, userId) => {
 };
 
 // ─────────────────────────────────────────
-// CREATE (ALL USERS)
+// CREATE MEAL
 // ─────────────────────────────────────────
 router.post('/:homeId', auth, async (req, res) => {
   try {
     const { homeId } = req.params;
 
-    // ✅ CHECK HOME EXISTS
+    console.log('REQ BODY:', req.body);
+
+    // ✅ Check home exists
     const home = await Home.findById(homeId);
     if (!home) {
       return res.status(404).json({ message: 'Home not found' });
     }
 
-    // ✅ CHECK USER IS MEMBER
+    // ✅ Check membership
     const isMember = home.members.some(
       (m) => m.user.toString() === req.user.userId
     );
@@ -36,19 +38,32 @@ router.post('/:homeId', auth, async (req, res) => {
       });
     }
 
-    // ✅ SAFE CREATE (NO NaN / BAD DATE)
+    // ✅ Safe number parser
+    const parseNumber = (val) => {
+      if (val === undefined || val === null) return 0;
+      const num = Number(val);
+      return isNaN(num) ? 0 : num;
+    };
+
+    // ✅ Safe date
+    const date = req.body.date ? new Date(req.body.date) : new Date();
+    if (isNaN(date)) {
+      return res.status(400).json({ message: 'Invalid date format' });
+    }
+
+    // ✅ Create meal
     const meal = await Meal.create({
-      homeId: homeId,
+      homeId,
       userId: req.user.userId,
-      date: req.body.date ? new Date(req.body.date) : new Date(),
-      mealCount: Number(req.body.mealCount) || 0,
-      eggsCount: Number(req.body.eggsCount) || 0,
+      date,
+      mealCount: parseNumber(req.body.mealCount),
+      eggsCount: parseNumber(req.body.eggsCount),
     });
 
     res.json(meal);
 
   } catch (err) {
-    console.error('CREATE MEAL ERROR:', err); // 🔥 IMPORTANT
+    console.error('CREATE MEAL ERROR:', err);
     res.status(500).json({
       message: 'Failed to create meal',
       error: err.message
@@ -57,7 +72,7 @@ router.post('/:homeId', auth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// GET (WITH USER INFO)
+// GET MEALS
 // ─────────────────────────────────────────
 router.get('/:homeId', auth, async (req, res) => {
   try {
@@ -88,6 +103,11 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       });
     }
 
+    const parseNumber = (val) => {
+      const num = Number(val);
+      return isNaN(num) ? 0 : num;
+    };
+
     const meal = await Meal.findOneAndUpdate(
       {
         _id: req.params.mealId,
@@ -95,8 +115,8 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       },
       {
         date: req.body.date ? new Date(req.body.date) : undefined,
-        mealCount: Number(req.body.mealCount) || 0,
-        eggsCount: Number(req.body.eggsCount) || 0,
+        mealCount: parseNumber(req.body.mealCount),
+        eggsCount: parseNumber(req.body.eggsCount),
       },
       { new: true }
     );
