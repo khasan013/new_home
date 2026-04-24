@@ -34,17 +34,42 @@ const mealSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-// ✅ FIXED PRE SAVE HOOK (NO next)
-mealSchema.pre('save', function () {
+
+// 🔥 Normalize date (works for BOTH save + update)
+function normalizeDate(next) {
   if (this.date) {
     const d = new Date(this.date);
     d.setHours(0, 0, 0, 0);
     this.date = d;
   }
+  next();
+}
+
+// ✅ Apply to create
+mealSchema.pre('save', normalizeDate);
+
+// ✅ Apply to update (VERY IMPORTANT)
+mealSchema.pre('findOneAndUpdate', function (next) {
+  const update = this.getUpdate();
+
+  if (update.date) {
+    const d = new Date(update.date);
+    d.setHours(0, 0, 0, 0);
+    update.date = d;
+  }
+
+  next();
 });
 
 
+// 🔥 Prevent duplicate entries (same user + same day + same home)
+mealSchema.index(
+  { homeId: 1, userId: 1, date: 1 },
+  { unique: true }
+);
 
+
+// 🔥 Query performance
 mealSchema.index({ homeId: 1, date: 1 });
 
 module.exports = mongoose.model('Meal', mealSchema);

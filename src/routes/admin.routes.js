@@ -1,101 +1,220 @@
 // routes/admin.routes.js
 const express = require('express');
-const mongoose = require('mongoose');
 const Home    = require('../models/Home');
 const User    = require('../models/User');
+const Meal    = require('../models/Meal');
+const Expense = require('../models/Expense');
+const Penalty = require('../models/Penalty');
 const auth    = require('../middleware/auth');
+const { sendBillEmail } = require('../utils/sendEmail');
 
 const router = express.Router();
 
-// ── Admin guard middleware ────────────────────────────────
-const adminOnly = async (req, res, next) => {
-  try {
-    const home = await Home.findById(req.params.homeId);
-    if (!home) return res.status(404).json({ message: 'Home not found' });
-
-    const member = home.members.find(m => m.user.toString() === req.user.userId);
-    if (!member || member.role !== 'admin')
-      return res.status(403).json({ message: 'Admin access required' });
-
-    req.home = home;
-    next();
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+// ── Helper: verify caller is admin ───────────────────────
+const requireAdmin = async (homeId, userId) => {
+  const home = await Home.findById(homeId);
+  if (!home) throw Object.assign(new Error('Home not found'), { status: 404 });
+  const member = home.members.find(m => m.user.toString() === userId);
+  if (!member || member.role !== 'admin')
+    throw Object.assign(new Error('Admin access required'), { status: 403 });
+  return home;
 };
 
-// ── In-memory penalty store (replace with a Penalty model for production) ──
-// Using a simple Map keyed by homeId for now
-const penaltyStore = new Map(); // homeId → [{ _id, userId, amount, reason, month, year }]
+// ─────────────────────────────────────────────────────────
+// MEMBERS
+// ─────────────────────────────────────────────────────────
 
-const getPenalties = (homeId) => penaltyStore.get(homeId) || [];
-const setPenalties = (homeId, list) => penaltyStore.set(homeId, list);
-
-// GET /api/admin/:homeId/members
-router.get('/:homeId/members', auth, adminOnly, async (req, res) => {
+// GET /admin/:homeId/members
+router.get('/:homeId/members', auth, async (req, res) => {
   try {
-    const home = await Home.findById(req.params.homeId)
-                           .populate('members.user', 'firstName lastName email isVerified');
-    res.json(home.members);
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    const populated = await Home.findById(req.params.homeId)
+      .populate('members.user', 'firstName lastName email');
+    res.json(populated.members);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.status || 500).json({ message: err.message });
   }
 });
 
-// PUT /api/admin/:homeId/members/:userId/promote  (toggle admin ↔ member)
-router.put('/:homeId/members/:userId/promote', auth, adminOnly, async (req, res) => {
+// PUT /admin/:homeId/members/:userId/promote
+router.put('/:homeId/members/:userId/promote', auth, async (req, res) => {
   try {
-    const home   = req.home;
-    const target = home.members.find(m => m.user.toString() === req.params.userId);
-    if (!target) return res.status(404).json({ message: 'Member not found' });
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    const member = home.members.find(m => m.user.toString() === req.params.userId);
+    if (!member) return res.status(404).json({ message: 'Member not found' });
 
-    target.role = target.role === 'admin' ? 'member' : 'admin';
+    member.role = member.role === 'admin' ? 'member' : 'admin';
     await home.save();
-
-    res.json({ role: target.role });
+    res.json({ role: member.role });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.status || 500).json({ message: err.message });
   }
 });
 
-// DELETE /api/admin/:homeId/members/:userId
-router.delete('/:homeId/members/:userId', auth, adminOnly, async (req, res) => {
+// DELETE /admin/:homeId/members/:userId
+router.delete('/:homeId/members/:userId', auth, async (req, res) => {
   try {
-    const home = req.home;
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
     home.members = home.members.filter(m => m.user.toString() !== req.params.userId);
     await home.save();
     res.json({ message: 'Member removed' });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.status || 500).json({ message: err.message });
   }
 });
 
-// GET /api/admin/:homeId/penalties
-router.get('/:homeId/penalties', auth, adminOnly, (req, res) => {
-  res.json(getPenalties(req.params.homeId));
+// ─────────────────────────────────────────────────────────
+// PENALTIES  (penalty = extra meals deducted from user balance)
+// ─────────────────────────────────────────────────────────
+
+// GET /admin/:homeId/penalties
+router.get('/:homeId/penalties', auth, async (req, res) => {
+  try {
+    await requireAdmin(req.params.homeId, req.user.userId);
+    const penalties = await Penalty.find({ homeId: req.params.homeId })
+      .populate('userId', 'firstName lastName email')
+      .sort({ createdAt: -1 });
+    res.json(penalties);
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
 });
 
-// POST /api/admin/:homeId/penalties
-router.post('/:homeId/penalties', auth, adminOnly, (req, res) => {
-  const { userId, amount, reason, month, year } = req.body;
-  const list = getPenalties(req.params.homeId);
-  const newPenalty = {
-    _id: new mongoose.Types.ObjectId().toString(),
-    userId, amount: parseFloat(amount), reason,
-    month: month || new Date().getMonth() + 1,
-    year:  year  || new Date().getFullYear(),
-  };
-  list.push(newPenalty);
-  setPenalties(req.params.homeId, list);
-  res.json(newPenalty);
+// POST /admin/:homeId/penalties
+// Body: { userId, meals, reason }
+// Effect: creates a Penalty record AND injects a negative meal entry so the
+//         user's effective meal count goes up (they owe more).
+router.post('/:homeId/penalties', auth, async (req, res) => {
+  try {
+    await requireAdmin(req.params.homeId, req.user.userId);
+
+    const { userId, meals, reason } = req.body;
+    if (!userId || !meals) {
+      return res.status(400).json({ message: 'userId and meals are required' });
+    }
+
+    const penaltyMeals = Math.abs(Number(meals));
+
+    // 1. Save penalty record
+    const penalty = await Penalty.create({
+      homeId: req.params.homeId,
+      userId,
+      amount: penaltyMeals,
+      reason: reason || `Penalty – ${penaltyMeals} meals`,
+    });
+
+    // 2. Inject a meal entry so it counts in bill calculation
+    //    mealCount is positive so totalMeals increases → user pays more
+    await Meal.create({
+      homeId: req.params.homeId,
+      userId,
+      date: new Date(),
+      mealCount: penaltyMeals,
+      eggsCount: 0,
+      isPenalty: true,          // flag for display purposes
+      penaltyReason: reason || `Penalty`,
+    });
+
+    const populated = await penalty.populate('userId', 'firstName lastName email');
+    res.json(populated);
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
 });
 
-// DELETE /api/admin/:homeId/penalties/:penId
-router.delete('/:homeId/penalties/:penId', auth, adminOnly, (req, res) => {
-  const list    = getPenalties(req.params.homeId);
-  const updated = list.filter(p => p._id !== req.params.penId);
-  setPenalties(req.params.homeId, updated);
-  res.json({ message: 'Penalty removed' });
+// DELETE /admin/:homeId/penalties/:penId
+router.delete('/:homeId/penalties/:penId', auth, async (req, res) => {
+  try {
+    await requireAdmin(req.params.homeId, req.user.userId);
+    await Penalty.findOneAndDelete({ _id: req.params.penId, homeId: req.params.homeId });
+    res.json({ message: 'Penalty removed' });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// BILL  – admin enters total costs, system calculates each
+//         member's share and emails everyone automatically
+// ─────────────────────────────────────────────────────────
+
+// POST /admin/:homeId/bill/send
+// Body: { totalEggPrice, totalEggCount, consumedEgg, otherCost, month }
+router.post('/:homeId/bill/send', auth, async (req, res) => {
+  try {
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    const fullHome = await Home.findById(req.params.homeId)
+      .populate('members.user', 'firstName lastName email isVerified');
+
+    const { totalEggPrice, totalEggCount, consumedEgg, otherCost, month } = req.body;
+
+    // ── Egg cost math ──────────────────────────────────
+    const eggPrice   = Number(totalEggPrice) || 0;
+    const eggCount   = Number(totalEggCount) || 1;  // avoid div/0
+    const consumed   = Number(consumedEgg)   || 0;
+    const other      = Number(otherCost)     || 0;
+
+    const perEgg          = eggPrice / eggCount;
+    const consumedCost    = consumed * perEgg;
+    const remainingEggCost = eggPrice - consumedCost;
+    const totalBill       = other + remainingEggCost;
+
+    // ── Meal-based fair share ──────────────────────────
+    const meals = await Meal.find({ homeId: req.params.homeId })
+      .populate('userId', 'firstName lastName email');
+
+    const totalMeals = meals.reduce((s, m) => s + m.mealCount, 0);
+    const perMeal    = totalMeals ? totalBill / totalMeals : 0;
+
+    // Build member breakdown
+    const memberMap = {};
+    for (const meal of meals) {
+      if (!meal.userId) continue;
+      const uid  = meal.userId._id.toString();
+      const name = `${meal.userId.firstName || ''} ${meal.userId.lastName || ''}`.trim()
+                   || meal.userId.email;
+      if (!memberMap[uid]) memberMap[uid] = { name, email: meal.userId.email, meals: 0, share: 0 };
+      memberMap[uid].meals += meal.mealCount;
+    }
+    Object.values(memberMap).forEach(m => {
+      m.share = totalMeals ? (m.meals / totalMeals) * totalBill : 0;
+    });
+
+    const breakdown = Object.values(memberMap);
+
+    // ── Email every verified member ────────────────────
+    let sent = 0;
+    for (const { user } of fullHome.members) {
+      if (!user || !user.isVerified) continue;
+      const uid   = user._id.toString();
+      const entry = memberMap[uid];
+      const share = entry ? entry.share : 0;
+      const userMeals = entry ? entry.meals : 0;
+
+      await sendBillEmail({
+        to:        user.email,
+        firstName: user.firstName || 'there',
+        month:     month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+        totalBill,
+        perMeal,
+        userMeals,
+        share,
+        breakdown,
+        costSummary: { eggPrice, perEgg, consumedCost, remainingEggCost, other },
+      });
+      sent++;
+    }
+
+    res.json({
+      message: `✅ Bills sent to ${sent} member(s)`,
+      totalBill,
+      perMeal,
+      breakdown,
+    });
+  } catch (err) {
+    console.error('BILL SEND ERROR:', err);
+    res.status(err.status || 500).json({ message: err.message });
+  }
 });
 
 module.exports = router;
