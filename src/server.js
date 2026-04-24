@@ -27,34 +27,46 @@ app.use('/api/report',  require('./routes/report.routes'));
 app.use('/api/admin',   require('./routes/admin.routes'));
 
 
-// ── Health check (optional but useful) ─────────────────
+// ── Health check ───────────────────────────────────────
 app.get('/', (req, res) => {
   res.send('API is running...');
 });
 
 
-// ── MongoDB connection (serverless safe) ───────────────
-let isConnected = false;
+// ── 🔥 FIXED MongoDB connection (CACHED) ───────────────
+let cached = global.mongoose;
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
 
 async function connectDB() {
-  if (isConnected) return;
+  // already connected
+  if (cached.conn) return cached.conn;
 
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
+  // create connection promise if not exists
+  if (!cached.promise) {
+    cached.promise = mongoose.connect(process.env.MONGO_URI, {
       bufferCommands: false,
+    }).then((mongooseInstance) => {
+      console.log('✅ MongoDB Connected');
+      return mongooseInstance;
     });
-
-    isConnected = true;
-    console.log('✅ MongoDB Connected');
-  } catch (err) {
-    console.error('❌ MongoDB connection failed:', err.message);
-    throw err;
   }
+
+  // wait for connection
+  cached.conn = await cached.promise;
+  return cached.conn;
 }
 
 
 // ── Vercel handler ─────────────────────────────────────
 module.exports = async (req, res) => {
-  await connectDB();
-  return app(req, res);
+  try {
+    await connectDB(); // 🔥 MUST await before using DB
+    return app(req, res);
+  } catch (err) {
+    console.error('❌ Server error:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
 };
