@@ -1,6 +1,6 @@
 const express = require('express');
 const Meal = require('../models/Meal');
-const Home = require('../models/Home'); // ✅ ADD THIS
+const Home = require('../models/Home');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -17,13 +17,30 @@ const isAdmin = (home, userId) => {
 // ─────────────────────────────────────────
 router.post('/:homeId', auth, async (req, res) => {
   try {
+    const { homeId } = req.params;
+
+    // ✅ CHECK HOME EXISTS
+    const home = await Home.findById(homeId);
+    if (!home) {
+      return res.status(404).json({ message: 'Home not found' });
+    }
+
+    // ✅ CHECK USER IS MEMBER
+    const isMember = home.members.some(
+      (m) => m.user.toString() === req.user.userId
+    );
+
+    if (!isMember) {
+      return res.status(403).json({
+        message: 'You are not a member of this home'
+      });
+    }
+
+    // ✅ SAFE CREATE (NO NaN / BAD DATE)
     const meal = await Meal.create({
-      homeId: req.params.homeId,
+      homeId: homeId,
       userId: req.user.userId,
-
-      // ✅ FIX
       date: req.body.date ? new Date(req.body.date) : new Date(),
-
       mealCount: Number(req.body.mealCount) || 0,
       eggsCount: Number(req.body.eggsCount) || 0,
     });
@@ -31,7 +48,7 @@ router.post('/:homeId', auth, async (req, res) => {
     res.json(meal);
 
   } catch (err) {
-    console.error('CREATE MEAL ERROR:', err);
+    console.error('CREATE MEAL ERROR:', err); // 🔥 IMPORTANT
     res.status(500).json({
       message: 'Failed to create meal',
       error: err.message
@@ -40,12 +57,12 @@ router.post('/:homeId', auth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// GET (IMPORTANT: populate user)
+// GET (WITH USER INFO)
 // ─────────────────────────────────────────
 router.get('/:homeId', auth, async (req, res) => {
   try {
     const meals = await Meal.find({ homeId: req.params.homeId })
-      .populate('userId', 'firstName email') // ✅ FIX
+      .populate('userId', 'firstName email')
       .sort({ date: -1 });
 
     res.json(meals);
@@ -91,6 +108,7 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
     res.json(meal);
 
   } catch (err) {
+    console.error('UPDATE MEAL ERROR:', err);
     res.status(500).json({
       message: 'Failed to update meal',
       error: err.message
@@ -123,6 +141,7 @@ router.delete('/:homeId/:mealId', auth, async (req, res) => {
     res.json({ message: 'Deleted' });
 
   } catch (err) {
+    console.error('DELETE MEAL ERROR:', err);
     res.status(500).json({
       message: 'Failed to delete meal',
       error: err.message
