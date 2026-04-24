@@ -5,8 +5,8 @@ const userSchema = new mongoose.Schema({
     type: String, 
     unique: true, 
     required: true,
-    lowercase: true,        // ✅ ensure consistency
-    trim: true              // ✅ remove extra spaces
+    lowercase: true,
+    trim: true
   },
 
   password: { 
@@ -16,12 +16,12 @@ const userSchema = new mongoose.Schema({
 
   firstName: { 
     type: String,
-    trim: true              // ✅ clean input
+    trim: true
   },
 
   lastName: { 
     type: String,
-    trim: true              // ✅ clean input
+    trim: true
   },
 
   isVerified: { 
@@ -29,18 +29,27 @@ const userSchema = new mongoose.Schema({
     default: false 
   },
 
-  // 🔐 OTP fields
+  // 🔐 Email verification OTP
   otp: { 
     type: String 
   },
 
   otpExpiry: { 
     type: Date 
+  },
+
+  // 🔥 ADD THIS (FOR RESET PASSWORD)
+  resetOtp: {
+    type: String
+  },
+
+  resetOtpExpiry: {
+    type: Date
   }
 
 }, { timestamps: true });
 
-// ✅ Prevent duplicate email errors crash
+// index
 userSchema.index({ email: 1 }, { unique: true });
 
 module.exports = mongoose.model('User', userSchema);
