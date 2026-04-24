@@ -59,10 +59,10 @@ router.post('/:homeId', auth, async (req, res) => {
         date
       },
       {
-        $set: {
-          mealCount: parseNumber(req.body.mealCount),
-          eggsCount: parseNumber(req.body.eggsCount),
-        }
+        $inc: {
+  mealCount: parseNumber(req.body.mealCount),
+  eggsCount: parseNumber(req.body.eggsCount),
+}
       },
       {
         new: true,
