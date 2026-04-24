@@ -4,7 +4,7 @@ const User    = require('../models/User');
 const Meal    = require('../models/Meal');
 const Expense = require('../models/Expense');
 const { generateReportPDF } = require('../utils/pdfReport');
-const { sendReportEmail }   = require('../utils/mailer');
+const { sendReportEmail }   = require('../utils/sendEmail');
 
 /**
  * Builds and emails the monthly report for a single home.
