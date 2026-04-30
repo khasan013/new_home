@@ -6,13 +6,6 @@ const Expense = require('../models/Expense');
 const { generateReportPDF } = require('../utils/pdfReport');
 const { sendReportEmail }   = require('../utils/sendEmail');
 
-/**
- * Builds and emails the monthly report for a single home.
- * @param {Object} home   - populated Home document
- * @param {Date}   from   - start of period
- * @param {Date}   to     - end of period
- * @param {string} month  - human label, e.g. "March 2025"
- */
 const processHome = async (home, from, to, month) => {
   const meals    = await Meal.find({ homeId: home._id, date: { $gte: from, $lt: to } })
                              .populate('userId', 'firstName lastName email');
@@ -22,7 +15,6 @@ const processHome = async (home, from, to, month) => {
   const totalMeals   = meals.reduce((s, m) => s + m.mealCount, 0);
   const perMeal      = totalMeals ? totalExpense / totalMeals : 0;
 
-  // Build per-member breakdown map
   const memberMap = {};
   for (const meal of meals) {
     const uid  = meal.userId._id.toString();
@@ -31,14 +23,12 @@ const processHome = async (home, from, to, month) => {
     if (!memberMap[uid]) memberMap[uid] = { name, meals: 0, share: 0 };
     memberMap[uid].meals += meal.mealCount;
   }
-  // Calculate fair share for each member
   Object.values(memberMap).forEach(m => {
     m.share = totalMeals ? (m.meals / totalMeals) * totalExpense : 0;
   });
 
   const memberBreakdown = Object.values(memberMap);
 
-  // Generate PDF
   const pdfBuffer = await generateReportPDF({
     homeName: home.name,
     month,
@@ -48,7 +38,6 @@ const processHome = async (home, from, to, month) => {
     memberBreakdown
   });
 
-  // Email every verified member
   for (const member of home.members) {
     const user = await User.findById(member.user);
     if (!user || !user.isVerified) continue;
@@ -64,12 +53,8 @@ const processHome = async (home, from, to, month) => {
   }
 };
 
-/**
- * Fires on the last day of every month at 18:30 UTC = 12:30 AM BDT on the 1st.
- * Processes the current calendar month.
- */
-cron.schedule('58 18 28-31 * *', async () => {
-  // Skip if tomorrow is not the 1st (i.e. today is not the last day of the month)
+cron.schedule('1 18 28-31 * *', async () => {
+  // Skip if today is not the last day of the month
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (tomorrow.getDate() !== 1) return;
@@ -77,8 +62,8 @@ cron.schedule('58 18 28-31 * *', async () => {
   console.log('⏰ Monthly report cron started...');
 
   const now  = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);  // 1st of last month
-  const to   = new Date(now.getFullYear(), now.getMonth(),     1);  // 1st of this month
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);      // 1st of this month ✅
+  const to   = new Date(now.getFullYear(), now.getMonth() + 1, 1);  // 1st of next month ✅
   const month = from.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   try {
@@ -92,6 +77,6 @@ cron.schedule('58 18 28-31 * *', async () => {
   }
 });
 
-console.log('📅 Monthly report cron registered (runs last day of each month at 18:30 UTC = 12:30 AM BDT)');
+console.log('📅 Monthly report cron registered (runs last day of each month at 18:01 UTC = 12:01 AM BDT)');
 
 module.exports = { processHome };
