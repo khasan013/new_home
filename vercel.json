@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/monthly-report",
-      "schedule": "58 18 28-31 * *"
+    "schedule": "1 18 28-31 * *"
     }
   ]
 }
