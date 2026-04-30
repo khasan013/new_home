@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/reset-month",
       "schedule": "0 1 1 * *"
+    },
+    {
+      "path": "/api/cron/monthly-report",
+      "schedule": "40 18 28-31 * *"
     }
   ]
 }
