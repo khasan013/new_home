@@ -65,10 +65,15 @@ const processHome = async (home, from, to, month) => {
 };
 
 /**
- * Fires on the 1st of every month at 08:00.
- * Processes the previous calendar month.
+ * Fires on the last day of every month at 18:30 UTC = 12:30 AM BDT on the 1st.
+ * Processes the current calendar month.
  */
-cron.schedule('0 8 1 * *', async () => {
+cron.schedule('53 18 28-31 * *', async () => {
+  // Skip if tomorrow is not the 1st (i.e. today is not the last day of the month)
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (tomorrow.getDate() !== 1) return;
+
   console.log('⏰ Monthly report cron started...');
 
   const now  = new Date();
@@ -87,4 +92,6 @@ cron.schedule('0 8 1 * *', async () => {
   }
 });
 
-console.log('📅 Monthly report cron registered (runs 1st of each month at 08:00)');
+console.log('📅 Monthly report cron registered (runs last day of each month at 18:30 UTC = 12:30 AM BDT)');
+
+module.exports = { processHome };
