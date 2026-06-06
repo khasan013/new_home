@@ -92,11 +92,14 @@ router.post('/:homeId/penalties', auth, async (req, res) => {
     await requireAdmin(req.params.homeId, req.user.userId);
     const { userId, meals, reason, injectMeal } = req.body;
 
-    if (!userId || !meals) {
+    if (!userId || meals === undefined || meals === null || meals === '') {
       return res.status(400).json({ message: 'User and meals are required' });
     }
 
     const penaltyMeals = Number(meals);
+    if (!Number.isFinite(penaltyMeals) || penaltyMeals <= 0) {
+      return res.status(400).json({ message: 'Penalty meals must be a valid number greater than 0' });
+    }
 
     // ✅ 1. Save penalty (MAIN RECORD)
     const penalty = await Penalty.create({

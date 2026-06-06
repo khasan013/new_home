@@ -36,10 +36,13 @@ router.post('/:homeId', auth, async (req, res) => {
       });
     }
 
-    const parseNumber = (val) => {
+    const parseNonNegativeNumber = (val, fieldName) => {
       if (val === undefined || val === null) return 0;
       const num = Number(val);
-      return isNaN(num) ? 0 : num;
+      if (!Number.isFinite(num) || num < 0) {
+        throw Object.assign(new Error(`${fieldName} must be a valid non-negative number`), { status: 400 });
+      }
+      return num;
     };
 
     let date = req.body.date ? new Date(req.body.date) : new Date();
@@ -60,8 +63,8 @@ router.post('/:homeId', auth, async (req, res) => {
       },
       {
         $inc: {
-  mealCount: parseNumber(req.body.mealCount),
-  eggsCount: parseNumber(req.body.eggsCount),
+  mealCount: parseNonNegativeNumber(req.body.mealCount, 'Meal count'),
+  eggsCount: parseNonNegativeNumber(req.body.eggsCount, 'Egg count'),
 }
       },
       {
@@ -77,7 +80,7 @@ router.post('/:homeId', auth, async (req, res) => {
 
   } catch (err) {
     console.error('CREATE MEAL ERROR FULL:', err);
-    res.status(500).json({
+    res.status(err.status || 500).json({
       message: 'Failed to create meal',
       error: err.message
     });
@@ -136,9 +139,12 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
       });
     }
 
-    const parseNumber = (val) => {
+    const parseNonNegativeNumber = (val, fieldName) => {
       const num = Number(val);
-      return isNaN(num) ? 0 : num;
+      if (!Number.isFinite(num) || num < 0) {
+        throw Object.assign(new Error(`${fieldName} must be a valid non-negative number`), { status: 400 });
+      }
+      return num;
     };
 
     let date = req.body.date ? new Date(req.body.date) : undefined;
@@ -155,10 +161,10 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
 
     if (date) updateData.date = date;
     if (req.body.mealCount !== undefined) {
-      updateData.mealCount = parseNumber(req.body.mealCount);
+      updateData.mealCount = parseNonNegativeNumber(req.body.mealCount, 'Meal count');
     }
     if (req.body.eggsCount !== undefined) {
-      updateData.eggsCount = parseNumber(req.body.eggsCount);
+      updateData.eggsCount = parseNonNegativeNumber(req.body.eggsCount, 'Egg count');
     }
 
     const meal = await Meal.findOneAndUpdate(
@@ -178,7 +184,7 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
 
   } catch (err) {
     console.error('UPDATE MEAL ERROR:', err);
-    res.status(500).json({
+    res.status(err.status || 500).json({
       message: 'Failed to update meal',
       error: err.message
     });
