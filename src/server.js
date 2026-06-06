@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+require('./jobs/monthlyBill');
 
 const app = express();
 

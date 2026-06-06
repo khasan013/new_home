@@ -164,6 +164,13 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       month: 'long',
       year: 'numeric',
     });
+    const now = new Date();
+    const periodStart = req.body.periodStart
+      ? new Date(req.body.periodStart)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
+    const periodEnd = req.body.periodEnd
+      ? new Date(req.body.periodEnd)
+      : new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
     const eggPrice = Number(req.body.totalEggPrice) || 0;
     const eggCount = Number(req.body.totalEggCount) || 0;
@@ -232,7 +239,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     let sent = 0;
     let failed = 0;
     for (const { user } of fullHome.members) {
-      if (!user || !user.isVerified) continue;
+      if (!user || !user.email) continue;
       const uid = user._id.toString();
       const entry = memberMap[uid];
 
@@ -258,6 +265,8 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const bill = await Bill.create({
       homeId: req.params.homeId,
       month,
+      periodStart,
+      periodEnd,
       totalEggPrice: eggPrice,
       totalEggCount: eggCount,
       consumedEgg: consumed,
@@ -292,8 +301,10 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
 router.get('/:homeId/bills', auth, async (req, res) => {
   try {
     await requireHomeMember(req.params.homeId, req.user.userId);
+    const limit = Math.min(Number(req.query.limit) || 3, 12);
     const bills = await Bill.find({ homeId: req.params.homeId })
-      .sort({ createdAt: -1 })
+      .sort({ periodStart: -1, createdAt: -1 })
+      .limit(limit)
       .lean();
     res.json(bills);
   } catch (err) {

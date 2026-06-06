@@ -33,6 +33,13 @@ const billSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  periodStart: {
+    type: Date,
+    index: true,
+  },
+  periodEnd: {
+    type: Date,
+  },
   totalEggPrice: {
     type: Number,
     default: 0,
@@ -85,5 +92,6 @@ const billSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 billSchema.index({ homeId: 1, createdAt: -1 });
+billSchema.index({ homeId: 1, periodStart: -1 });
 
 module.exports = mongoose.model('Bill', billSchema);
