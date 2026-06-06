@@ -1,11 +1,16 @@
 require('dotenv').config();
 
+const crypto = require('crypto');
+
+if (!globalThis.crypto) {
+  globalThis.crypto = crypto.webcrypto;
+}
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const crypto = require('crypto');
 
 const app = express();
 
