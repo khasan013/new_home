@@ -5,8 +5,10 @@ const User = require('../models/User');
 const Meal = require('../models/Meal');
 const Expense = require('../models/Expense');
 const Penalty = require('../models/Penalty');
+const Bill = require('../models/Bill');
 const auth = require('../middleware/auth');
 const { sendBillEmail } = require('../utils/sendEmail');
+const { requireHomeMember } = require('../utils/homeAccess');
 
 
 const router = express.Router();
@@ -151,103 +153,162 @@ router.delete('/:homeId/penalties/:penId', auth, async (req, res) => {
 // Body: { totalEggPrice, totalEggCount, consumedEgg, otherCost, month }
 router.post('/:homeId/bill/send', auth, async (req, res) => {
   try {
-    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    await requireAdmin(req.params.homeId, req.user.userId);
     const fullHome = await Home.findById(req.params.homeId)
       .populate('members.user', 'firstName lastName email isVerified');
 
-    const {
-      totalEggPrice,
-      totalEggCount,
-      consumedEgg,
-      otherCost,
-      totalMeals,   // ✅ from frontend
-      totalBill,    // ✅ from frontend
-      perEgg,       // ✅ from frontend
-      month
-    } = req.body;
+    const month = req.body.month || new Date().toLocaleDateString('en-US', {
+      month: 'long',
+      year: 'numeric',
+    });
 
-    // ── Egg cost math ──────────────────────────────────
-    const eggPrice = Number(totalEggPrice) || 0;
-    const eggCount = Number(totalEggCount) || 1;  // avoid div/0
-    const consumed = Number(consumedEgg) || 0;
+    const eggPrice = Number(req.body.totalEggPrice) || 0;
+    const eggCount = Number(req.body.totalEggCount) || 0;
+    const consumed = Number(req.body.consumedEgg) || 0;
+    const other = Number(req.body.otherCost) || 0;
+    const perEgg = Number(req.body.perEgg) || (eggCount > 0 ? eggPrice / eggCount : 0);
     const consumedCost = consumed * perEgg;
-const remainingEggCost = eggPrice - consumedCost;
-    const other = Number(otherCost) || 0;
+    const remainingEggCost = eggPrice - consumedCost;
 
-    // ── Meal-based fair share ──────────────────────────
     const meals = await Meal.find({
       homeId: req.params.homeId,
-      isPenalty: false
+      isPenalty: false,
     })
       .populate('userId', 'firstName lastName email')
       .lean();
 
-    const calculatedMeals = meals.reduce((s, m) => s + m.mealCount, 0);
-    if (calculatedMeals !== totalMeals) {
-  console.warn('⚠️ Meal mismatch:', calculatedMeals, totalMeals);
-}
-    const perMeal = totalMeals ? totalBill / totalMeals : 0;
+    const calculatedMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
+    const totalMeals = Number(req.body.totalMeals) || calculatedMeals;
+    const totalBill = Number(req.body.totalBill) || (remainingEggCost + other);
 
-    // Build member breakdown
+    if (totalMeals <= 0) {
+      return res.status(400).json({ message: 'No meals found for this bill' });
+    }
+
+    if ([eggPrice, eggCount, consumed, other, perEgg, totalMeals, totalBill].some(value => Number.isNaN(value) || value < 0)) {
+      return res.status(400).json({ message: 'Bill values must be valid positive numbers' });
+    }
+
+    if (Math.abs(calculatedMeals - totalMeals) > 0.001) {
+      console.warn('Meal mismatch:', calculatedMeals, totalMeals);
+    }
+
+    const perMeal = totalBill / totalMeals;
     const memberMap = {};
+
     for (const meal of meals) {
       if (!meal.userId) continue;
       const uid = meal.userId._id.toString();
       const name = `${meal.userId.firstName || ''} ${meal.userId.lastName || ''}`.trim()
         || meal.userId.email;
+
       if (!memberMap[uid]) {
         memberMap[uid] = {
+          userId: uid,
           name,
           email: meal.userId.email,
           meals: 0,
-          eggs: 0,   // ✅ ADD THIS
-          share: 0
+          eggs: 0,
+          share: 0,
         };
       }
 
-      memberMap[uid].meals += meal.mealCount;
-      memberMap[uid].eggs += meal.eggsCount || 0;
+      memberMap[uid].meals += Number(meal.mealCount) || 0;
+      memberMap[uid].eggs += Number(meal.eggsCount) || 0;
     }
-    Object.values(memberMap).forEach(m => {
-  const mealCost = (totalMeals ? (totalBill / totalMeals) : 0) * m.meals;
-  const eggCost  = (m.eggs || 0) * perEgg;
 
-  m.share = mealCost + eggCost; // ✅ FINAL CORRECT COST
-});
+    Object.values(memberMap).forEach(member => {
+      const mealCost = perMeal * member.meals;
+      const eggCost = member.eggs * perEgg;
+      member.share = mealCost + eggCost;
+    });
 
     const breakdown = Object.values(memberMap);
+    const costSummary = { eggPrice, perEgg, consumedCost, remainingEggCost, other };
 
-    // ── Email every verified member ────────────────────
     let sent = 0;
+    let failed = 0;
     for (const { user } of fullHome.members) {
       if (!user || !user.isVerified) continue;
       const uid = user._id.toString();
       const entry = memberMap[uid];
-      const share = entry ? entry.share : 0;
-      const userMeals = entry ? entry.meals : 0;
 
-      await sendBillEmail({
-        to: user.email,
-        firstName: user.firstName || 'there',
-        month: month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-        totalBill,
-        perMeal,
-        userMeals,
-        share,
-        breakdown,
-        costSummary: { eggPrice, perEgg, consumedCost, remainingEggCost, other },
-      });
-      sent++;
+      try {
+        await sendBillEmail({
+          to: user.email,
+          firstName: user.firstName || 'there',
+          month,
+          totalBill,
+          perMeal,
+          userMeals: entry ? entry.meals : 0,
+          share: entry ? entry.share : 0,
+          breakdown,
+          costSummary,
+        });
+        sent++;
+      } catch (mailErr) {
+        failed++;
+        console.error(`Bill email failed for ${user.email}:`, mailErr.message);
+      }
     }
 
+    const bill = await Bill.create({
+      homeId: req.params.homeId,
+      month,
+      totalEggPrice: eggPrice,
+      totalEggCount: eggCount,
+      consumedEgg: consumed,
+      otherCost: other,
+      totalMeals,
+      totalBill,
+      perEgg,
+      perMeal,
+      sentCount: sent,
+      sentBy: req.user.userId,
+      breakdown,
+      costSummary,
+    });
+
     res.json({
-      message: `✅ Bills sent to ${sent} member(s)`,
+      message: failed
+        ? `Bill saved. Sent to ${sent} member(s), ${failed} email(s) failed`
+        : `Bills sent to ${sent} member(s)`,
+      bill,
       totalBill,
       perMeal,
       breakdown,
+      failed,
     });
   } catch (err) {
     console.error('BILL SEND ERROR:', err);
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+// GET /admin/:homeId/bills
+router.get('/:homeId/bills', auth, async (req, res) => {
+  try {
+    await requireHomeMember(req.params.homeId, req.user.userId);
+    const bills = await Bill.find({ homeId: req.params.homeId })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(bills);
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+// GET /admin/:homeId/bills/:billId
+router.get('/:homeId/bills/:billId', auth, async (req, res) => {
+  try {
+    await requireHomeMember(req.params.homeId, req.user.userId);
+    const bill = await Bill.findOne({
+      _id: req.params.billId,
+      homeId: req.params.homeId,
+    }).lean();
+    if (!bill) return res.status(404).json({ message: 'Bill not found' });
+    res.json(bill);
+  } catch (err) {
     res.status(err.status || 500).json({ message: err.message });
   }
 });

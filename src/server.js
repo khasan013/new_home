@@ -72,6 +72,8 @@ app.use('/api/expense', require('./routes/expense.routes'));
 app.use('/api/report', require('./routes/report.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/cron', require('./routes/cron.routes'));
+app.use('/api/notices', require('./routes/notice.routes'));
+app.use('/api/emergency-contacts', require('./routes/emergencyContact.routes'));
 
 // ── Health Check Routes ───────────────────────────────
 app.get('/', (req, res) => {
