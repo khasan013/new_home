@@ -202,6 +202,27 @@ dns.lookup('smtp.gmail.com', { family: 4 }, (err, address) => {
 
   if (!smtpVerifyPromise) {
     console.log(`[email:${label}] SMTP connection verify started`);
+    const net = require('net');
+
+const socket = net.connect({
+  host: '74.125.130.108',
+  port: 587,
+  family: 4,
+});
+
+socket.on('connect', () => {
+  console.log('RAW IPV4 CONNECT SUCCESS');
+  socket.destroy();
+});
+
+socket.on('error', err => {
+  console.log('RAW IPV4 CONNECT ERROR', err);
+});
+
+socket.setTimeout(10000, () => {
+  console.log('RAW IPV4 CONNECT TIMEOUT');
+  socket.destroy();
+});
     smtpVerifyPromise = transporter.verify()
       .then(result => {
         console.log(`[email:${label}] SMTP connection verify succeeded:`, result);
