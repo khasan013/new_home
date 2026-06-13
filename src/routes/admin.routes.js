@@ -272,6 +272,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     });
 
     await Bill.findByIdAndUpdate(bill._id, { deliveryStatus: 'sending' });
+    let billForResponse = bill;
 
     try {
       const { sent, failed } = await deliverBillEmails({
@@ -287,27 +288,27 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
 
       const deliveryStatus = failed === 0
         ? 'sent'
-        : sent === 0
-          ? 'failed'
-          : 'partial';
+          : sent === 0
+            ? 'failed'
+            : 'partial';
 
-      await Bill.findByIdAndUpdate(bill._id, {
+      billForResponse = await Bill.findByIdAndUpdate(bill._id, {
         sentCount: sent,
         failedCount: failed,
         deliveryStatus,
         deliveryCompletedAt: new Date(),
-      });
+      }, { new: true }).lean() || bill;
     } catch (deliveryError) {
       console.error('BILL DELIVERY ERROR:', deliveryError);
-      await Bill.findByIdAndUpdate(bill._id, {
+      billForResponse = await Bill.findByIdAndUpdate(bill._id, {
         deliveryStatus: 'failed',
         deliveryCompletedAt: new Date(),
-      });
+      }, { new: true }).lean() || bill;
     }
 
     res.status(202).json({
       message: `Bill queued for ${recipients.length} member(s). You can send another bill anytime.`,
-      bill,
+      bill: billForResponse,
       totalBill,
       perMeal,
       breakdown,
