@@ -1,9 +1,5 @@
 console.log('=== SEND EMAIL FILE LOADED ===');
 console.log('=== VERSION 1 ===');
-
-
-dns.setDefaultResultOrder('ipv4first');
-
 const RESEND_API_URL = 'https://api.resend.com/emails';
 const EMAIL_RETRY_ATTEMPTS = Math.max(Number(process.env.EMAIL_RETRY_ATTEMPTS || 3), 1);
 const EMAIL_RETRY_BASE_DELAY_MS = Math.max(Number(process.env.EMAIL_RETRY_BASE_DELAY_MS || 750), 0);
