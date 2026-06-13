@@ -21,30 +21,27 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 // ── CORS Configuration ────────────────────────────────
-const allowedOrigins = (
-  process.env.CORS_ORIGINS ||
+const allowedOrigins = [
+  'https://www.khasan.live',
+  'https://khasan.live',
   'https://home-three-khaki-60.vercel.app'
-)
-  .split(',')
-  .map(origin => origin.trim())
-  .filter(Boolean);
+];
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow Postman, mobile apps, server-to-server requests
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
+    console.log('Blocked Origin:', origin);
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   credentials: true,
 };
-
 app.use(cors(corsOptions));
 
 // ── Body Parser ───────────────────────────────────────
@@ -57,6 +54,26 @@ app.use((req, res, next) => {
   req.id = req.headers['x-request-id'] || crypto.randomUUID();
 
   res.setHeader('X-Request-Id', req.id);
+
+  next();
+});
+
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    if (durationMs >= Number(process.env.SLOW_REQUEST_MS || 750)) {
+      console.warn('SLOW REQUEST', {
+        requestId: req.id,
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        durationMs: Number(durationMs.toFixed(1)),
+      });
+    }
+  });
 
   next();
 });

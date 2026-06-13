@@ -193,7 +193,7 @@ router.post('/forgot-password', otpLimiter, async (req, res) => {
 
     await user.save();
 
-    await sendOTP(email, otp);
+    await sendOTP(email, otp, { purpose: 'password-reset' });
 
     res.json({ message: 'Reset OTP sent' });
 

@@ -1,6 +1,7 @@
 // routes/home.routes.js
 const express = require('express');
 const Home    = require('../models/Home');
+const Meal    = require('../models/Meal');
 const auth    = require('../middleware/auth');
 
 const router = express.Router();
@@ -42,6 +43,54 @@ router.get('/', auth, async (req, res) => {
 });
 
 // GET /api/home/:homeId — get single home by ID
+router.get('/:homeId/members-summary', auth, async (req, res) => {
+  try {
+    const { homeId } = req.params;
+    const homeObjectId = Home.schema.path('_id').cast(homeId);
+
+    const [home, usage] = await Promise.all([
+      Home.findById(homeObjectId)
+        .populate('members.user', 'firstName lastName email')
+        .lean(),
+      Meal.aggregate([
+        { $match: { homeId: homeObjectId } },
+        {
+          $group: {
+            _id: '$userId',
+            meals: { $sum: '$mealCount' },
+            eggs: { $sum: '$eggsCount' },
+          },
+        },
+      ]),
+    ]);
+
+    if (!home) {
+      return res.status(404).json({ message: 'Home not found' });
+    }
+
+    const isMember = home.members.some(m => m.user?._id?.toString() === req.user.userId);
+    if (!isMember) {
+      return res.status(403).json({ message: 'You do not have access to this home' });
+    }
+
+    const usageByUser = new Map(
+      usage.map(item => [
+        item._id.toString(),
+        { meals: item.meals || 0, eggs: item.eggs || 0 },
+      ])
+    );
+
+    home.members = home.members.map(member => {
+      const totals = usageByUser.get(member.user?._id?.toString()) || { meals: 0, eggs: 0 };
+      return { ...member, meals: totals.meals, eggs: totals.eggs };
+    });
+
+    res.json(home);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch member summary', error: err.message });
+  }
+});
+
 router.get('/:homeId', auth, async (req, res) => {
   try {
     const { homeId } = req.params;

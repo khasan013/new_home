@@ -1,152 +1,162 @@
-// utils/sendEmail.js
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
+  pool: true,
+  maxConnections: 3,
+  maxMessages: 50,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
 
-// ── Send OTP ──────────────────────────────────────────────
-const sendOTP = async (to, otp) => {
+const escapeHtml = value => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
+
+const money = value => `BDT ${Number(value || 0).toFixed(2)}`;
+const sender = `"MealMate" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
+
+const sendOTP = async (to, otp, options = {}) => {
+  const isReset = options.purpose === 'password-reset';
+  const title = isReset ? 'Reset your password' : 'Verify your email';
+  const intro = isReset
+    ? 'Use this secure code to continue resetting your MealMate password.'
+    : 'Use this secure code to finish creating your MealMate account.';
+
   await transporter.sendMail({
-    from: `"MealApp" <${process.env.EMAIL_USER}>`,
+    from: sender,
     to,
-    subject: 'Your MealApp Verification Code',
+    subject: `${otp} is your MealMate security code`,
+    text: `${title}\n\nYour MealMate code is ${otp}. It expires in 10 minutes. Do not share this code.`,
     html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;
-                  border:1px solid #e5e7eb;border-radius:12px;">
-        <h2 style="color:#4F46E5;margin-bottom:8px;">MealApp</h2>
-        <p>Your one-time verification code is:</p>
-        <div style="font-size:36px;font-weight:700;letter-spacing:8px;
-                    color:#111827;margin:24px 0;">${otp}</div>
-        <p style="color:#6b7280;font-size:13px;">Expires in 10 minutes. Do not share this code.</p>
+      <div style="margin:0;background:#f1f5f9;padding:36px 12px;font-family:Arial,sans-serif;color:#0f172a;">
+        <div style="max-width:520px;margin:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,.10);">
+          <div style="padding:26px 32px;background:linear-gradient(135deg,#0f172a,#312e81);">
+            <div style="color:#ffffff;font-size:22px;font-weight:800;">MealMate</div>
+            <div style="color:#c4b5fd;font-size:12px;margin-top:4px;letter-spacing:1.2px;">SECURE ACCOUNT ACCESS</div>
+          </div>
+          <div style="padding:34px 32px;">
+            <h1 style="font-size:24px;margin:0 0 12px;color:#0f172a;">${title}</h1>
+            <p style="font-size:15px;line-height:1.7;color:#475569;margin:0;">${intro}</p>
+            <div style="margin:28px 0;padding:24px;text-align:center;border-radius:16px;background:#eef2ff;border:1px solid #c7d2fe;">
+              <div style="font-size:11px;font-weight:700;color:#6366f1;letter-spacing:1.6px;">YOUR ONE-TIME CODE</div>
+              <div style="font-size:40px;line-height:1.2;font-weight:800;letter-spacing:10px;color:#312e81;margin-top:10px;">${escapeHtml(otp)}</div>
+            </div>
+            <div style="padding:14px 16px;border-radius:12px;background:#fff7ed;color:#9a3412;font-size:13px;line-height:1.6;">
+              This code expires in 10 minutes. MealMate will never ask you to share it.
+            </div>
+            <p style="font-size:12px;line-height:1.6;color:#94a3b8;margin:24px 0 0;">If you did not request this code, you can safely ignore this email.</p>
+          </div>
+        </div>
       </div>`,
   });
 };
 
-// ── Send monthly report PDF ───────────────────────────────
 const sendReportEmail = async ({ to, firstName, month, pdfBuffer }) => {
   await transporter.sendMail({
-    from: `"MealApp" <${process.env.EMAIL_USER}>`,
+    from: sender,
     to,
-    subject: `MealApp – Your Report for ${month}`,
+    subject: `Your MealMate report for ${month}`,
+    text: `Hi ${firstName}, your MealMate report for ${month} is attached.`,
     html: `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;
-                  border:1px solid #e5e7eb;border-radius:12px;">
-        <h2 style="color:#4F46E5;">Monthly Report</h2>
-        <p>Hi <strong>${firstName}</strong>,</p>
-        <p>Please find your meal expense report for <strong>${month}</strong> attached.</p>
-        <p style="color:#6b7280;font-size:13px;">— The MealApp Team</p>
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:32px;border:1px solid #e2e8f0;border-radius:16px;">
+        <h2 style="color:#312e81;margin:0 0 14px;">Monthly report</h2>
+        <p>Hi <strong>${escapeHtml(firstName)}</strong>,</p>
+        <p style="color:#475569;line-height:1.7;">Your meal expense report for <strong>${escapeHtml(month)}</strong> is attached.</p>
+        <p style="color:#94a3b8;font-size:12px;">Generated securely by MealMate.</p>
       </div>`,
-    attachments: [
-      {
-        filename: `MealApp_Report_${month.replace(' ', '_')}.pdf`,
-        content:  pdfBuffer,
-        contentType: 'application/pdf',
-      },
-    ],
+    attachments: [{
+      filename: `MealMate_Report_${String(month).replace(/[^a-z0-9]+/gi, '_')}.pdf`,
+      content: pdfBuffer,
+      contentType: 'application/pdf',
+    }],
   });
 };
 
-// ── Send bill email ───────────────────────────────────────
-/**
- * @param {Object} opts
- * @param {string}   opts.to
- * @param {string}   opts.firstName
- * @param {string}   opts.month
- * @param {number}   opts.totalBill       – total home bill
- * @param {number}   opts.perMeal         – cost per meal
- * @param {number}   opts.userMeals       – this user's meal count (incl. penalties)
- * @param {number}   opts.share           – this user's amount due
- * @param {Array}    opts.breakdown        – [{ name, meals, share }]
- * @param {Object}   opts.costSummary     – { eggPrice, perEgg, consumedCost, remainingEggCost, other }
- */
 const sendBillEmail = async ({
-  to, firstName, month,
-  totalBill, perMeal, userMeals, share,
-  breakdown, costSummary,
+  to,
+  firstName,
+  month,
+  totalBill,
+  perMeal,
+  userMeals,
+  share,
+  breakdown,
+  costSummary,
+  pdfBuffer,
+  homeName,
 }) => {
-  const { eggPrice, perEgg, consumedCost, remainingEggCost, other } = costSummary;
+  const {
+    eggPrice = 0,
+    perEgg = 0,
+    consumedCost = 0,
+    remainingEggCost = 0,
+    other = 0,
+  } = costSummary || {};
 
-  const rows = breakdown.map(m => `
-    <tr style="border-bottom:1px solid #f3f4f6;">
-      <td style="padding:8px 12px;">${m.name}</td>
-      <td style="padding:8px 12px;text-align:center;">${m.meals}</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:600;">৳${m.share.toFixed(2)}</td>
+  const rows = (breakdown || []).map(member => `
+    <tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#334155;">${escapeHtml(member.name)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#475569;">${Number(member.meals || 0)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#0f172a;">${money(member.share)}</td>
     </tr>`).join('');
 
   await transporter.sendMail({
-    from: `"MealApp" <${process.env.EMAIL_USER}>`,
+    from: sender,
     to,
-    subject: `MealApp – Your Bill for ${month}`,
+    subject: `Your MealMate bill for ${month}: ${money(share)}`,
+    text: `Hi ${firstName}, your MealMate bill for ${month} is ${money(share)}. Your detailed PDF statement is attached.`,
     html: `
-    <div style="font-family:sans-serif;max-width:580px;margin:auto;">
-
-      <!-- Header -->
-      <div style="background:#4F46E5;padding:28px 32px;border-radius:12px 12px 0 0;">
-        <h1 style="color:#fff;margin:0;font-size:22px;">MealApp</h1>
-        <p style="color:#c7d2fe;margin:4px 0 0;">Monthly Bill · ${month}</p>
-      </div>
-
-      <!-- Body -->
-      <div style="padding:28px 32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
-        <p>Hi <strong>${firstName}</strong>,</p>
-        <p>Your bill for <strong>${month}</strong> is ready.</p>
-
-        <!-- Your amount -->
-        <div style="background:#f5f3ff;border-radius:10px;padding:20px 24px;margin:20px 0;
-                    display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <div style="color:#6b7280;font-size:13px;">YOUR AMOUNT DUE</div>
-            <div style="color:#4F46E5;font-size:32px;font-weight:700;">৳${share.toFixed(2)}</div>
+      <div style="margin:0;background:#f1f5f9;padding:36px 12px;font-family:Arial,sans-serif;color:#0f172a;">
+        <div style="max-width:620px;margin:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,.10);">
+          <div style="padding:28px 34px;background:linear-gradient(135deg,#0f172a,#312e81);">
+            <div style="color:#ffffff;font-size:24px;font-weight:800;">MealMate</div>
+            <div style="color:#c4b5fd;font-size:12px;margin-top:5px;letter-spacing:1.2px;">MONTHLY MEAL STATEMENT</div>
           </div>
-          <div style="text-align:right;">
-            <div style="color:#6b7280;font-size:13px;">Your meals</div>
-            <div style="font-size:22px;font-weight:600;">${userMeals}</div>
-            <div style="color:#6b7280;font-size:12px;">৳${perMeal.toFixed(2)} / meal</div>
+          <div style="padding:32px 34px;">
+            <p style="font-size:16px;color:#334155;margin:0 0 8px;">Hi <strong>${escapeHtml(firstName)}</strong>,</p>
+            <p style="font-size:14px;line-height:1.7;color:#64748b;margin:0;">Your statement for <strong>${escapeHtml(month)}</strong> is ready. A detailed PDF is attached for your records.</p>
+
+            <div style="margin:24px 0;padding:22px;border-radius:16px;background:#eef2ff;border:1px solid #c7d2fe;">
+              <div style="font-size:11px;font-weight:700;color:#6366f1;letter-spacing:1.4px;">YOUR AMOUNT DUE</div>
+              <div style="font-size:34px;font-weight:800;color:#312e81;margin-top:7px;">${money(share)}</div>
+              <div style="font-size:13px;color:#64748b;margin-top:8px;">${Number(userMeals || 0)} meals at ${money(perMeal)} per meal</div>
+            </div>
+
+            <h3 style="font-size:15px;margin:0 0 10px;color:#0f172a;">Cost summary</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:24px;">
+              <tr><td style="padding:7px 0;color:#64748b;">Egg purchases</td><td style="text-align:right;font-weight:600;">${money(eggPrice)}</td></tr>
+              <tr><td style="padding:7px 0;color:#64748b;">Price per egg</td><td style="text-align:right;font-weight:600;">${money(perEgg)}</td></tr>
+              <tr><td style="padding:7px 0;color:#64748b;">Consumed egg cost</td><td style="text-align:right;font-weight:600;">${money(consumedCost)}</td></tr>
+              <tr><td style="padding:7px 0;color:#64748b;">Remaining egg cost</td><td style="text-align:right;font-weight:600;">${money(remainingEggCost)}</td></tr>
+              <tr><td style="padding:7px 0;color:#64748b;">Other cost</td><td style="text-align:right;font-weight:600;">${money(other)}</td></tr>
+              <tr><td style="padding:11px 0;border-top:2px solid #c7d2fe;font-weight:800;">Home total</td><td style="padding:11px 0;border-top:2px solid #c7d2fe;text-align:right;font-weight:800;color:#4f46e5;">${money(totalBill)}</td></tr>
+            </table>
+
+            <h3 style="font-size:15px;margin:0 0 10px;color:#0f172a;">Member breakdown</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e2e8f0;">
+              <thead><tr style="background:#f8fafc;">
+                <th style="padding:10px 12px;text-align:left;color:#64748b;">Member</th>
+                <th style="padding:10px 12px;text-align:center;color:#64748b;">Meals</th>
+                <th style="padding:10px 12px;text-align:right;color:#64748b;">Amount</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+
+            <p style="font-size:12px;line-height:1.6;color:#94a3b8;margin:24px 0 0;">Home: ${escapeHtml(homeName || 'MealMate Home')}. This email was generated automatically by MealMate.</p>
           </div>
         </div>
-
-        <!-- Cost breakdown -->
-        <h3 style="color:#111827;margin-bottom:8px;">Cost Breakdown</h3>
-        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px;">
-          <tr><td style="padding:6px 0;color:#6b7280;">Total Egg Price</td>
-              <td style="text-align:right;">৳${eggPrice.toFixed(2)}</td></tr>
-          <tr><td style="padding:6px 0;color:#6b7280;">Per Egg</td>
-              <td style="text-align:right;">৳${perEgg.toFixed(2)}</td></tr>
-          <tr><td style="padding:6px 0;color:#6b7280;">Consumed Egg Cost</td>
-              <td style="text-align:right;">৳${consumedCost.toFixed(2)}</td></tr>
-          <tr><td style="padding:6px 0;color:#6b7280;">Remaining Egg Cost</td>
-              <td style="text-align:right;">৳${remainingEggCost.toFixed(2)}</td></tr>
-          <tr><td style="padding:6px 0;color:#6b7280;">Other Cost</td>
-              <td style="text-align:right;">৳${other.toFixed(2)}</td></tr>
-          <tr style="border-top:2px solid #4F46E5;">
-            <td style="padding:10px 0;font-weight:700;">Total Bill</td>
-            <td style="text-align:right;font-weight:700;color:#4F46E5;">৳${totalBill.toFixed(2)}</td>
-          </tr>
-        </table>
-
-        <!-- All members -->
-        <h3 style="color:#111827;margin-bottom:8px;">All Members</h3>
-        <table style="width:100%;border-collapse:collapse;font-size:14px;">
-          <thead>
-            <tr style="background:#f9fafb;">
-              <th style="padding:10px 12px;text-align:left;color:#6b7280;">Name</th>
-              <th style="padding:10px 12px;text-align:center;color:#6b7280;">Meals</th>
-              <th style="padding:10px 12px;text-align:right;color:#6b7280;">Amount</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <p style="color:#6b7280;font-size:12px;margin-top:24px;">
-          — The MealApp Team
-        </p>
-      </div>
-    </div>`,
+      </div>`,
+    attachments: pdfBuffer ? [{
+      filename: `MealMate_Bill_${String(month).replace(/[^a-z0-9]+/gi, '_')}.pdf`,
+      content: pdfBuffer,
+      contentType: 'application/pdf',
+    }] : [],
   });
 };
 

@@ -7,8 +7,8 @@ const Expense = require('../models/Expense');
 const Penalty = require('../models/Penalty');
 const Bill = require('../models/Bill');
 const auth = require('../middleware/auth');
-const { sendBillEmail } = require('../utils/sendEmail');
 const { requireHomeMember } = require('../utils/homeAccess');
+const { deliverBillEmails } = require('../services/billDelivery');
 
 
 const router = express.Router();
@@ -31,9 +31,8 @@ const requireAdmin = async (homeId, userId) => {
 router.get('/:homeId/members', auth, async (req, res) => {
   try {
     const home = await requireAdmin(req.params.homeId, req.user.userId);
-    const populated = await Home.findById(req.params.homeId)
-      .populate('members.user', 'firstName lastName email');
-    res.json(populated.members);
+    await home.populate('members.user', 'firstName lastName email');
+    res.json(home.members);
   } catch (err) {
     res.status(err.status || 500).json({ message: err.message });
   }
@@ -156,9 +155,8 @@ router.delete('/:homeId/penalties/:penId', auth, async (req, res) => {
 // Body: { totalEggPrice, totalEggCount, consumedEgg, otherCost, month }
 router.post('/:homeId/bill/send', auth, async (req, res) => {
   try {
-    await requireAdmin(req.params.homeId, req.user.userId);
-    const fullHome = await Home.findById(req.params.homeId)
-      .populate('members.user', 'firstName lastName email isVerified');
+    const fullHome = await requireAdmin(req.params.homeId, req.user.userId);
+    await fullHome.populate('members.user', 'firstName lastName email isVerified');
 
     const month = req.body.month || new Date().toLocaleDateString('en-US', {
       month: 'long',
@@ -184,6 +182,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       homeId: req.params.homeId,
       isPenalty: false,
     })
+      .select('userId mealCount eggsCount')
       .populate('userId', 'firstName lastName email')
       .lean();
 
@@ -236,31 +235,31 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const breakdown = Object.values(memberMap);
     const costSummary = { eggPrice, perEgg, consumedCost, remainingEggCost, other };
 
-    let sent = 0;
-    let failed = 0;
-    for (const { user } of fullHome.members) {
-      if (!user || !user.email) continue;
-      const uid = user._id.toString();
-      const entry = memberMap[uid];
+    const recipients = fullHome.members
+      .filter(({ user }) => user?.email)
+      .map(({ user }) => {
+        const entry = memberMap[user._id.toString()];
+        const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+        return {
+          email: user.email,
+          firstName: user.firstName,
+          name,
+          meals: entry?.meals || 0,
+          eggs: entry?.eggs || 0,
+          share: entry?.share || 0,
+        };
+      });
 
-      try {
-        await sendBillEmail({
-          to: user.email,
-          firstName: user.firstName || 'there',
-          month,
-          totalBill,
-          perMeal,
-          userMeals: entry ? entry.meals : 0,
-          share: entry ? entry.share : 0,
-          breakdown,
-          costSummary,
-        });
-        sent++;
-      } catch (mailErr) {
-        failed++;
-        console.error(`Bill email failed for ${user.email}:`, mailErr.message);
-      }
-    }
+    const { sent, failed } = await deliverBillEmails({
+      recipients,
+      homeName: fullHome.name,
+      month,
+      totalBill,
+      totalMeals,
+      perMeal,
+      breakdown,
+      costSummary,
+    });
 
     const bill = await Bill.create({
       homeId: req.params.homeId,

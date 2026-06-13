@@ -2,7 +2,7 @@ const Bill = require('../models/Bill');
 const Expense = require('../models/Expense');
 const Home = require('../models/Home');
 const Meal = require('../models/Meal');
-const { sendBillEmail } = require('../utils/sendEmail');
+const { deliverBillEmails } = require('./billDelivery');
 
 function getPreviousMonthPeriod(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -64,11 +64,16 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       homeId,
       isPenalty: false,
       date: { $gte: periodStart, $lt: periodEnd },
-    }).populate('userId', 'firstName lastName email').lean(),
+    })
+      .select('userId mealCount eggsCount')
+      .populate('userId', 'firstName lastName email')
+      .lean(),
     Expense.find({
       homeId,
       createdAt: { $gte: periodStart, $lt: periodEnd },
-    }).lean(),
+    })
+      .select('amount category eggQty')
+      .lean(),
   ]);
 
   const totalEggPrice = expenses
@@ -137,28 +142,16 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     other: otherCost,
   };
 
-  let sent = 0;
-  let failed = 0;
-  for (const member of breakdown) {
-    if (!member.email) continue;
-    try {
-      await sendBillEmail({
-        to: member.email,
-        firstName: member.name.split(' ')[0] || 'there',
-        month,
-        totalBill,
-        perMeal,
-        userMeals: member.meals,
-        share: member.share,
-        breakdown,
-        costSummary,
-      });
-      sent++;
-    } catch (err) {
-      failed++;
-      console.error(`Monthly bill email failed for ${member.email}:`, err.message);
-    }
-  }
+  const { sent, failed } = await deliverBillEmails({
+    recipients: breakdown,
+    homeName: fullHome.name,
+    month,
+    totalBill,
+    totalMeals,
+    perMeal,
+    breakdown,
+    costSummary,
+  });
 
   const adminMember = fullHome.members.find(member => member.role === 'admin' && member.user)
     || fullHome.members.find(member => member.user);

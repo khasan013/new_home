@@ -2,6 +2,7 @@ const express = require('express');
 const Meal = require('../models/Meal');
 const Home = require('../models/Home');
 const auth = require('../middleware/auth');
+const { requireHomeMember } = require('../utils/homeAccess');
 
 const router = express.Router();
 
@@ -93,6 +94,8 @@ router.post('/:homeId', auth, async (req, res) => {
 // ─────────────────────────────────────────
 router.get('/:homeId', auth, async (req, res) => {
   try {
+    await requireHomeMember(req.params.homeId, req.user.userId);
+
     const limit = Math.min(Number(req.query.limit) || 0, 100);
     const skip = Math.max(Number(req.query.skip) || 0, 0);
     const query = Meal.find({ homeId: req.params.homeId })
@@ -118,9 +121,8 @@ router.get('/:homeId', auth, async (req, res) => {
     res.json(meals);
 
   } catch (err) {
-    res.status(500).json({
-      message: 'Failed to fetch meals',
-      error: err.message
+    res.status(err.status || 500).json({
+      message: err.message || 'Failed to fetch meals'
     });
   }
 });
