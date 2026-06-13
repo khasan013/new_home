@@ -52,9 +52,7 @@ async function deliverBillEmails({
     });
   });
 
-  const results = [];
-
-  for (const recipient of validRecipients) {
+  const sendToRecipient = async (recipient) => {
     try {
       console.log('Bill email PDF generation started:', {
         email: recipient.email,
@@ -137,12 +135,13 @@ async function deliverBillEmails({
         messageId: info?.messageId,
       });
 
-      results.push({ status: 'fulfilled', value: recipient.email });
+      return { status: 'fulfilled', value: recipient.email };
     } catch (error) {
-      results.push({ status: 'rejected', reason: error });
-      continue;
+      return { status: 'rejected', reason: error };
     }
-  }
+  };
+
+  const results = await Promise.all(validRecipients.map(sendToRecipient));
 
   const failures = results
     .filter(result => result.status === 'rejected')

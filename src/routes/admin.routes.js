@@ -301,60 +301,75 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       costSummary,
     });
 
-    const billForResponse = await Bill.findByIdAndUpdate(
-      bill._id,
-      { deliveryStatus: 'sending' },
-      { new: true },
-    ).lean() || bill;
+    await Bill.findByIdAndUpdate(bill._id, { deliveryStatus: 'sending' });
+    let billForResponse = bill;
 
-    deliverBillEmails({
-      recipients,
-      homeName: fullHome.name,
-      month,
-      totalBill,
-      totalMeals,
-      perMeal,
-      breakdown,
-      costSummary,
-    })
-      .then(async ({ sent, failed }) => {
-        console.log('BILL SEND FLOW: deliverBillEmails resolved', {
-          billId: bill._id,
-          sent,
-          failed,
-        });
-
-        const deliveryStatus = failed === 0
-          ? 'sent'
-          : sent === 0
-            ? 'failed'
-            : 'partial';
-
-        await Bill.findByIdAndUpdate(bill._id, {
-          sentCount: sent,
-          failedCount: failed,
-          deliveryStatus,
-          deliveryCompletedAt: new Date(),
-        });
-      })
-      .catch(async (deliveryError) => {
-        console.error('BILL DELIVERY ERROR:', deliveryError);
-        console.error('BILL DELIVERY ERROR STACK:', deliveryError?.stack || deliveryError);
-        await Bill.findByIdAndUpdate(bill._id, {
-          failedCount: recipients.length,
-          deliveryStatus: 'failed',
-          deliveryCompletedAt: new Date(),
-        });
+    try {
+      console.log('BILL SEND FLOW: invoking deliverBillEmails', {
+        billId: bill._id,
+        recipientCount: recipients.length,
+        month,
       });
 
-    return res.status(202).json({
-      message: `Bill generated. Email delivery started for ${recipients.length} member(s).`,
+      const { sent, failed } = await deliverBillEmails({
+        recipients,
+        homeName: fullHome.name,
+        month,
+        totalBill,
+        totalMeals,
+        perMeal,
+        breakdown,
+        costSummary,
+      });
+
+      console.log('BILL SEND FLOW: deliverBillEmails resolved', {
+        billId: bill._id,
+        sent,
+        failed,
+      });
+
+      const deliveryStatus = failed === 0
+        ? 'sent'
+        : sent === 0
+          ? 'failed'
+          : 'partial';
+
+      billForResponse = await Bill.findByIdAndUpdate(bill._id, {
+        sentCount: sent,
+        failedCount: failed,
+        deliveryStatus,
+        deliveryCompletedAt: new Date(),
+      }, { new: true }).lean() || bill;
+    } catch (deliveryError) {
+      console.error('BILL DELIVERY ERROR:', deliveryError);
+      console.error('BILL DELIVERY ERROR STACK:', deliveryError?.stack || deliveryError);
+      billForResponse = await Bill.findByIdAndUpdate(bill._id, {
+        failedCount: recipients.length,
+        deliveryStatus: 'failed',
+        deliveryCompletedAt: new Date(),
+      }, { new: true }).lean() || bill;
+    }
+
+    const responseMessage = billForResponse.deliveryStatus === 'failed'
+      ? `Bill generated, but email delivery failed for ${billForResponse.failedCount || recipients.length} member(s).`
+      : billForResponse.deliveryStatus === 'partial'
+        ? `Bill generated and partially sent (${billForResponse.sentCount || 0}/${recipients.length} member(s)).`
+        : `Bill generated and emailed to ${billForResponse.sentCount || recipients.length} member(s).`;
+
+    const responseBody = {
+      message: responseMessage,
       bill: billForResponse,
       totalBill,
       perMeal,
       breakdown,
       queued: recipients.length,
-    });
+    };
+
+    if (billForResponse.deliveryStatus !== 'sent') {
+      return res.status(502).json(responseBody);
+    }
+
+    return res.status(200).json(responseBody);
   } catch (err) {
     console.error('BILL SEND ERROR:', err);
     res.status(err.status || 500).json({ message: err.message });
