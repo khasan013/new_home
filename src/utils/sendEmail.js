@@ -174,6 +174,17 @@ const withEmailRetries = async (label, operation) => {
 };
 
 const verifySmtpConnection = async (label) => {
+dns.lookup('smtp.gmail.com', { all: true }, (err, addresses) => {
+
+  console.log('GMAIL DNS RESULTS', err, addresses);
+
+});
+dns.lookup('smtp.gmail.com', { family: 4 }, (err, address) => {
+
+  console.log('GMAIL IPV4', err, address);
+
+});
+
   logProviderConfig(label);
 
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
