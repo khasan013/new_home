@@ -1,14 +1,21 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
+const emailConfig = {
   service: 'gmail',
   pool: true,
   maxConnections: 3,
   maxMessages: 50,
+  connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 20000),
+  greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 20000),
+  socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 30000),
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+};
+
+const transporter = nodemailer.createTransport({
+  ...emailConfig,
 });
 
 const escapeHtml = value => String(value ?? '')
@@ -19,7 +26,99 @@ const escapeHtml = value => String(value ?? '')
   .replace(/'/g, '&#039;');
 
 const money = value => `BDT ${Number(value || 0).toFixed(2)}`;
-const sender = `"MealMate" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`;
+const configuredSenderEmail = String(process.env.EMAIL_FROM || '').trim();
+const senderEmail = configuredSenderEmail && configuredSenderEmail !== 'noreply@yourapp.com'
+  ? configuredSenderEmail
+  : process.env.EMAIL_USER;
+const sender = `"MealMate" <${senderEmail}>`;
+let smtpVerifyPromise = null;
+
+const isValidEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+
+const logEmailError = (label, error) => {
+  console.error(`[email:${label}] error message:`, error?.message || error);
+  console.error(`[email:${label}] error stack:`, error?.stack || error);
+  if (error?.response) console.error(`[email:${label}] provider response:`, error.response);
+  if (error?.responseCode) console.error(`[email:${label}] provider response code:`, error.responseCode);
+  if (error?.code) console.error(`[email:${label}] provider error code:`, error.code);
+  if (error?.command) console.error(`[email:${label}] failed SMTP command:`, error.command);
+};
+
+const verifySmtpConnection = async (label) => {
+  console.log(`[email:${label}] SMTP config:`, {
+    service: emailConfig.service,
+    pool: emailConfig.pool,
+    maxConnections: emailConfig.maxConnections,
+    maxMessages: emailConfig.maxMessages,
+    hasEmailUser: Boolean(process.env.EMAIL_USER),
+    emailUser: process.env.EMAIL_USER || null,
+    hasEmailPass: Boolean(process.env.EMAIL_PASS),
+    emailPassLength: process.env.EMAIL_PASS ? process.env.EMAIL_PASS.length : 0,
+    emailFrom: process.env.EMAIL_FROM || null,
+    senderEmail,
+  });
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error('EMAIL_USER and EMAIL_PASS must be configured before sending email');
+  }
+
+  if (!isValidEmail(senderEmail)) {
+    throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
+  }
+
+  if (!smtpVerifyPromise) {
+    console.log(`[email:${label}] SMTP connection verify started`);
+    smtpVerifyPromise = transporter.verify()
+      .then(result => {
+        console.log(`[email:${label}] SMTP connection verify succeeded:`, result);
+        return result;
+      })
+      .catch(error => {
+        smtpVerifyPromise = null;
+        logEmailError(label, error);
+        throw error;
+      });
+  } else {
+    console.log(`[email:${label}] SMTP connection verify using cached successful connection`);
+  }
+
+  return smtpVerifyPromise;
+};
+
+const sendMailWithLogging = async (label, mailOptions) => {
+  console.log(`[email:${label}] recipient email:`, mailOptions.to);
+  console.log(`[email:${label}] email subject:`, mailOptions.subject);
+  console.log(`[email:${label}] email body generation status:`, {
+    hasText: Boolean(mailOptions.text),
+    textLength: mailOptions.text ? mailOptions.text.length : 0,
+    hasHtml: Boolean(mailOptions.html),
+    htmlLength: mailOptions.html ? mailOptions.html.length : 0,
+    attachmentCount: Array.isArray(mailOptions.attachments) ? mailOptions.attachments.length : 0,
+  });
+
+  if (!isValidEmail(mailOptions.to)) {
+    throw new Error(`Invalid recipient email: ${mailOptions.to || '(empty)'}`);
+  }
+
+  await verifySmtpConnection(label);
+
+  try {
+    console.log(`[email:${label}] sendMail request started`);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[email:${label}] sendMail response:`, {
+      accepted: info.accepted,
+      rejected: info.rejected,
+      pending: info.pending,
+      response: info.response,
+      messageId: info.messageId,
+      envelope: info.envelope,
+    });
+    return info;
+  } catch (error) {
+    logEmailError(label, error);
+    throw error;
+  }
+};
 
 const sendOTP = async (to, otp, options = {}) => {
   const isReset = options.purpose === 'password-reset';
@@ -28,7 +127,7 @@ const sendOTP = async (to, otp, options = {}) => {
     ? 'Use this secure code to continue resetting your MealMate password.'
     : 'Use this secure code to finish creating your MealMate account.';
 
-  await transporter.sendMail({
+  return sendMailWithLogging('otp', {
     from: sender,
     to,
     subject: `${otp} is your MealMate security code`,
@@ -58,7 +157,7 @@ const sendOTP = async (to, otp, options = {}) => {
 };
 
 const sendReportEmail = async ({ to, firstName, month, pdfBuffer }) => {
-  await transporter.sendMail({
+  return sendMailWithLogging('report', {
     from: sender,
     to,
     subject: `Your MealMate report for ${month}`,
@@ -106,7 +205,7 @@ const sendBillEmail = async ({
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#0f172a;">${money(member.share)}</td>
     </tr>`).join('');
 
-  await transporter.sendMail({
+  return sendMailWithLogging('bill', {
     from: sender,
     to,
     subject: `Your MealMate bill for ${month}: ${money(share)}`,

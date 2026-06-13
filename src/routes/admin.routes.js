@@ -155,8 +155,21 @@ router.delete('/:homeId/penalties/:penId', auth, async (req, res) => {
 // Body: { totalEggPrice, totalEggCount, consumedEgg, otherCost, month }
 router.post('/:homeId/bill/send', auth, async (req, res) => {
   try {
+    console.log('BILL SEND FLOW: request received', {
+      homeId: req.params.homeId,
+      userId: req.user.userId,
+      requestedMonth: req.body.month,
+    });
+
     const fullHome = await requireAdmin(req.params.homeId, req.user.userId);
     await fullHome.populate('members.user', 'firstName lastName email isVerified');
+
+    console.log('BILL SEND FLOW: home loaded', {
+      homeId: fullHome._id,
+      homeName: fullHome.name,
+      memberCount: fullHome.members?.length || 0,
+      memberEmails: (fullHome.members || []).map(member => member.user?.email || null),
+    });
 
     const month = req.body.month || new Date().toLocaleDateString('en-US', {
       month: 'long',
@@ -185,6 +198,12 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       .select('userId mealCount eggsCount')
       .populate('userId', 'firstName lastName email')
       .lean();
+
+    console.log('BILL SEND FLOW: meals loaded', {
+      homeId: req.params.homeId,
+      mealCount: meals.length,
+      populatedMealEmails: meals.map(meal => meal.userId?.email || null),
+    });
 
     const calculatedMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
     const totalMeals = Number(req.body.totalMeals) || calculatedMeals;
@@ -236,7 +255,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const costSummary = { eggPrice, perEgg, consumedCost, remainingEggCost, other };
 
     const recipients = fullHome.members
-      .filter(({ user }) => user?.email)
+      .filter(({ user }) => user)
       .map(({ user }) => {
         const entry = memberMap[user._id.toString()];
         const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
@@ -249,6 +268,17 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
           share: entry?.share || 0,
         };
       });
+
+    console.log('BILL SEND FLOW: recipients prepared', {
+      recipientCount: recipients.length,
+      recipients: recipients.map(recipient => ({
+        email: recipient.email,
+        name: recipient.name,
+        meals: recipient.meals,
+        eggs: recipient.eggs,
+        share: recipient.share,
+      })),
+    });
 
     const bill = await Bill.create({
       homeId: req.params.homeId,
@@ -275,6 +305,12 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     let billForResponse = bill;
 
     try {
+      console.log('BILL SEND FLOW: invoking deliverBillEmails', {
+        billId: bill._id,
+        recipientCount: recipients.length,
+        month,
+      });
+
       const { sent, failed } = await deliverBillEmails({
         recipients,
         homeName: fullHome.name,
@@ -284,6 +320,12 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
         perMeal,
         breakdown,
         costSummary,
+      });
+
+      console.log('BILL SEND FLOW: deliverBillEmails resolved', {
+        billId: bill._id,
+        sent,
+        failed,
       });
 
       const deliveryStatus = failed === 0
@@ -300,6 +342,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       }, { new: true }).lean() || bill;
     } catch (deliveryError) {
       console.error('BILL DELIVERY ERROR:', deliveryError);
+      console.error('BILL DELIVERY ERROR STACK:', deliveryError?.stack || deliveryError);
       billForResponse = await Bill.findByIdAndUpdate(bill._id, {
         deliveryStatus: 'failed',
         deliveryCompletedAt: new Date(),
