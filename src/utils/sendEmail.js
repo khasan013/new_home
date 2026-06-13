@@ -1,5 +1,8 @@
 const nodemailer = require('nodemailer');
 const dns = require('dns');
+console.log('=== SEND EMAIL FILE LOADED ===');
+console.log('=== VERSION 1 ===');
+
 
 dns.setDefaultResultOrder('ipv4first');
 
@@ -35,7 +38,6 @@ const smtpLookup = (hostname, options, callback) => {
       });
       return callback(error);
     }
-
     console.log('[email:smtp-lookup] SMTP host resolved', {
       hostname,
       address,
@@ -71,7 +73,6 @@ const emailConfig = {
     pass: process.env.EMAIL_PASS,
   },
 };
-
 const createEmailTransporter = (overrides = {}) => nodemailer.createTransport({
   ...emailConfig,
   ...overrides,
