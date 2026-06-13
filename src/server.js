@@ -25,9 +25,9 @@ app.set('trust proxy', 1);
 app.get('/smtp-raw-test', (req, res) => {
   const socket = net.createConnection(
     {
-    host: 'smtp.gmail.com',
-    port: 443,
-    family: 4,
+   host: 'smtp.office365.com',
+port: 587,
+family: 4
     },
     () => {
       socket.end();
