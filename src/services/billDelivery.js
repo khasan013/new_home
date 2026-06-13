@@ -1,10 +1,23 @@
 const { sendBillEmail } = require('../utils/sendEmail');
 const { generateBillPDF } = require('../utils/billPdf');
 
-const BILL_EMAIL_MAX_ATTEMPTS = Math.max(Number(process.env.BILL_EMAIL_MAX_ATTEMPTS || 3), 1);
-const BILL_EMAIL_RETRY_DELAY_MS = Math.max(Number(process.env.BILL_EMAIL_RETRY_DELAY_MS || 1500), 0);
+const BILL_EMAIL_CONCURRENCY = Math.max(Number(process.env.BILL_EMAIL_CONCURRENCY || 2), 1);
 
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
 
 async function deliverBillEmails({
   recipients,
@@ -80,52 +93,19 @@ async function deliverBillEmails({
         pdfBytes: pdfBuffer?.length || 0,
       });
 
-      let info = null;
-      let lastError = null;
-
-      for (let attempt = 1; attempt <= BILL_EMAIL_MAX_ATTEMPTS; attempt += 1) {
-        try {
-          console.log('Bill email send attempt started:', {
-            email: recipient.email,
-            attempt,
-            maxAttempts: BILL_EMAIL_MAX_ATTEMPTS,
-          });
-
-          info = await sendBillEmail({
-            to: recipient.email,
-            firstName: recipient.firstName || recipient.name?.split(' ')[0] || 'there',
-            month,
-            totalBill,
-            perMeal,
-            userMeals: recipient.meals,
-            share: recipient.share,
-            breakdown,
-            costSummary,
-            pdfBuffer,
-            homeName,
-          });
-
-          lastError = null;
-          break;
-        } catch (error) {
-          lastError = error;
-          console.error('Bill email send attempt failed:', {
-            email: recipient.email,
-            attempt,
-            maxAttempts: BILL_EMAIL_MAX_ATTEMPTS,
-            message: error?.message || error,
-            stack: error?.stack || error,
-          });
-
-          if (attempt < BILL_EMAIL_MAX_ATTEMPTS && BILL_EMAIL_RETRY_DELAY_MS > 0) {
-            await wait(BILL_EMAIL_RETRY_DELAY_MS);
-          }
-        }
-      }
-
-      if (lastError) {
-        throw lastError;
-      }
+      const info = await sendBillEmail({
+        to: recipient.email,
+        firstName: recipient.firstName || recipient.name?.split(' ')[0] || 'there',
+        month,
+        totalBill,
+        perMeal,
+        userMeals: recipient.meals,
+        share: recipient.share,
+        breakdown,
+        costSummary,
+        pdfBuffer,
+        homeName,
+      });
 
       console.log('Bill email send completed:', {
         email: recipient.email,
@@ -141,7 +121,7 @@ async function deliverBillEmails({
     }
   };
 
-  const results = await Promise.all(validRecipients.map(sendToRecipient));
+  const results = await mapWithConcurrency(validRecipients, BILL_EMAIL_CONCURRENCY, sendToRecipient);
 
   const failures = results
     .filter(result => result.status === 'rejected')

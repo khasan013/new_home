@@ -1,18 +1,22 @@
 const nodemailer = require('nodemailer');
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
+const EMAIL_RETRY_ATTEMPTS = Math.max(Number(process.env.EMAIL_RETRY_ATTEMPTS || 3), 1);
+const EMAIL_RETRY_BASE_DELAY_MS = Math.max(Number(process.env.EMAIL_RETRY_BASE_DELAY_MS || 750), 0);
+const RESEND_TIMEOUT_MS = Math.max(Number(process.env.RESEND_TIMEOUT_MS || 15000), 1000);
 
 const emailConfig = {
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: Number(process.env.SMTP_PORT || 587),
-  secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
-  requireTLS: true,
+  secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true'
+    || Number(process.env.SMTP_PORT || 587) === 465,
+  requireTLS: Number(process.env.SMTP_PORT || 587) !== 465,
   pool: true,
-  maxConnections: 3,
-  maxMessages: 50,
-  connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 20000),
-  greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 20000),
-  socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 30000),
+  maxConnections: Number(process.env.SMTP_MAX_CONNECTIONS || 3),
+  maxMessages: Number(process.env.SMTP_MAX_MESSAGES || 50),
+  connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
+  greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
+  socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -42,19 +46,21 @@ const sender = `"MealMate" <${senderEmail}>`;
 let smtpVerifyPromise = null;
 const hasResendApiKey = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 'kkkk');
 const emailProvider = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
-const activeEmailProvider = emailProvider === 'resend' || (emailProvider === 'auto' && hasResendApiKey)
+const activeEmailProvider = emailProvider === 'resend'
   ? 'resend'
   : 'smtp';
 
 const isValidEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const logEmailError = (label, error) => {
-  console.error(`[email:${label}] error message:`, error?.message || error);
-  console.error(`[email:${label}] error stack:`, error?.stack || error);
-  if (error?.response) console.error(`[email:${label}] provider response:`, error.response);
-  if (error?.responseCode) console.error(`[email:${label}] provider response code:`, error.responseCode);
-  if (error?.code) console.error(`[email:${label}] provider error code:`, error.code);
-  if (error?.command) console.error(`[email:${label}] failed SMTP command:`, error.command);
+  console.error(`[email:${label}] delivery failure`, {
+    message: error?.message || String(error),
+    code: error?.code,
+    command: error?.command,
+    responseCode: error?.responseCode,
+    response: error?.response,
+    stack: error?.stack,
+  });
 };
 
 const logProviderConfig = (label) => {
@@ -66,12 +72,55 @@ const logProviderConfig = (label) => {
     smtpPort: emailConfig.port,
     smtpSecure: emailConfig.secure,
     hasEmailUser: Boolean(process.env.EMAIL_USER),
-    emailUser: process.env.EMAIL_USER || null,
     hasEmailPass: Boolean(process.env.EMAIL_PASS),
-    emailPassLength: process.env.EMAIL_PASS ? process.env.EMAIL_PASS.length : 0,
-    emailFrom: process.env.EMAIL_FROM || null,
-    senderEmail,
+    hasEmailFrom: Boolean(process.env.EMAIL_FROM),
+    senderDomain: senderEmail?.split('@')[1] || null,
   });
+};
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const isTransientEmailError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  const responseCode = Number(error?.responseCode || 0);
+
+  const networkTemporary = [
+    'ETIMEDOUT',
+    'ECONNECTION',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'EAI_AGAIN',
+    'ESOCKET',
+    'ENOTFOUND',
+    'RESEND_TIMEOUT',
+  ].includes(code);
+  const smtpTemporary = responseCode === 421 || responseCode === 450 || responseCode === 451 || responseCode === 452;
+  const resendTemporary = code === 'RESEND_SEND_FAILED' && responseCode >= 500;
+
+  return networkTemporary || smtpTemporary || resendTemporary;
+};
+
+const withEmailRetries = async (label, operation) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= EMAIL_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      console.log(`[email:${label}] attempt ${attempt}/${EMAIL_RETRY_ATTEMPTS} started`);
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+      logEmailError(label, error);
+
+      if (attempt >= EMAIL_RETRY_ATTEMPTS || !isTransientEmailError(error)) {
+        throw error;
+      }
+
+      const delay = EMAIL_RETRY_BASE_DELAY_MS * (2 ** (attempt - 1));
+      if (delay > 0) await wait(delay);
+    }
+  }
+
+  throw lastError;
 };
 
 const verifySmtpConnection = async (label) => {
@@ -157,6 +206,9 @@ const sendWithResend = async (label, mailOptions) => {
 
   console.log(`[email:${label}] Resend HTTPS send request started`);
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
+
   const response = await fetch(RESEND_API_URL, {
     method: 'POST',
     headers: {
@@ -171,7 +223,15 @@ const sendWithResend = async (label, mailOptions) => {
       html: mailOptions.html,
       attachments: toResendAttachments(mailOptions.attachments),
     }),
-  });
+    signal: controller.signal,
+  }).catch(error => {
+    if (error?.name === 'AbortError') {
+      throw Object.assign(new Error(`Resend request timed out after ${RESEND_TIMEOUT_MS}ms`), {
+        code: 'RESEND_TIMEOUT',
+      });
+    }
+    throw error;
+  }).finally(() => clearTimeout(timeout));
 
   const data = await response.json().catch(() => null);
 
@@ -220,29 +280,14 @@ const sendMailWithLogging = async (label, mailOptions) => {
   }
 
   if (activeEmailProvider === 'resend') {
-    try {
-      return await sendWithResend(label, mailOptions);
-    } catch (error) {
-      logEmailError(label, error);
-      throw error;
-    }
+    return withEmailRetries(label, () => sendWithResend(label, mailOptions));
   }
 
-  const activeTransporter = label === 'bill'
-    ? createEmailTransporter({ pool: false })
-    : transporter;
+  ensureSmtpConfigured(label);
 
-  try {
-    if (label === 'bill') {
-      console.log(`[email:${label}] SMTP connection verify started`);
-      await activeTransporter.verify();
-      console.log(`[email:${label}] SMTP connection verify succeeded:`, true);
-    } else {
-      ensureSmtpConfigured(label);
-    }
-
+  return withEmailRetries(label, async () => {
     console.log(`[email:${label}] sendMail request started`);
-    const info = await activeTransporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
     console.log(`[email:${label}] sendMail response:`, {
       accepted: info.accepted,
       rejected: info.rejected,
@@ -252,15 +297,7 @@ const sendMailWithLogging = async (label, mailOptions) => {
       envelope: info.envelope,
     });
     return info;
-  } catch (error) {
-    logEmailError(label, error);
-    throw error;
-  } finally {
-    if (label === 'bill' && activeTransporter.close) {
-      activeTransporter.close();
-      console.log(`[email:${label}] SMTP connection closed`);
-    }
-  }
+  });
 };
 
 const sendOTP = async (to, otp, options = {}) => {

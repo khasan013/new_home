@@ -363,11 +363,8 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       perMeal,
       breakdown,
       queued: recipients.length,
+      deliveryStatus: billForResponse.deliveryStatus,
     };
-
-    if (billForResponse.deliveryStatus !== 'sent') {
-      return res.status(502).json(responseBody);
-    }
 
     return res.status(200).json(responseBody);
   } catch (err) {

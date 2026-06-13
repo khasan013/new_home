@@ -2,6 +2,7 @@ const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const User     = require('../models/User');
+const PendingRegistration = require('../models/PendingRegistration');
 const { sendOTP } = require('../utils/sendEmail');
 const { makeOTP, hashOTP, matchesOTP } = require('../utils/otp');
 const rateLimit = require('../middleware/rateLimit');
@@ -27,55 +28,45 @@ router.post('/register', authLimiter, async (req, res) => {
     }
 
     const existing = await User.findOne({ email });
-    if (existing?.isVerified) {
+    if (existing) {
+      if (!existing.isVerified) {
+        await User.deleteOne({ _id: existing._id, isVerified: false });
+      } else {
       return res.status(400).json({ message: 'Email already in use' });
+      }
     }
 
     const hash = await bcrypt.hash(password, 10);
     const otp  = makeOTP();
     const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-
-    let user = existing;
-    let createdUser = false;
-
-    if (user) {
-      user.password = hash;
-      user.firstName = firstName;
-      user.lastName = lastName;
-      user.otp = hashOTP(otp);
-      user.otpExpiry = otpExpiry;
-      user.resetOtp = undefined;
-      user.resetOtpExpiry = undefined;
-      await user.save();
-    } else {
-      user = await User.create({
+    const pending = await PendingRegistration.findOneAndUpdate(
+      { email },
+      {
         email,
         password: hash,
         firstName,
         lastName,
         otp: hashOTP(otp),
         otpExpiry,
-      });
-      createdUser = true;
-    }
+        expiresAt: otpExpiry,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
     try {
       await sendOTP(email, otp);
     } catch (emailError) {
-      if (createdUser) {
-        await User.deleteOne({ _id: user._id });
-      } else {
-        user.otp = undefined;
-        user.otpExpiry = undefined;
-        await user.save();
-      }
+      await PendingRegistration.deleteOne({ _id: pending._id });
       throw emailError;
     }
 
-    res.json({ message: 'Registered. Check your email for verification code.' });
+    res.json({ message: 'Verification code sent. Verify your email to create your account.' });
 
   } catch (err) {
-    console.log(err);
+    console.error('Registration failed:', {
+      message: err?.message || err,
+      stack: err?.stack || err,
+    });
     res.status(500).json({ message: 'Registration failed', error: err.message });
   }
 });
@@ -85,14 +76,66 @@ router.post('/register', authLimiter, async (req, res) => {
 // =========================================================
 router.post('/verify-otp', otpLimiter, async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const { otp } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const pending = await PendingRegistration.findOne({ email });
+    const existingUser = await User.findOne({ email });
 
-    if (user.isVerified) {
+    if (existingUser?.isVerified) {
       return res.status(400).json({ message: 'Already verified' });
     }
+
+    if (pending) {
+      if (!matchesOTP(pending.otp, otp)) {
+        return res.status(400).json({ message: 'Invalid OTP' });
+      }
+
+      if (new Date() > pending.otpExpiry) {
+        await PendingRegistration.deleteOne({ _id: pending._id });
+        return res.status(400).json({ message: 'OTP expired' });
+      }
+
+      const user = existingUser || await User.create({
+        email: pending.email,
+        password: pending.password,
+        firstName: pending.firstName,
+        lastName: pending.lastName,
+        isVerified: true,
+      });
+
+      if (existingUser) {
+        existingUser.password = pending.password;
+        existingUser.firstName = pending.firstName;
+        existingUser.lastName = pending.lastName;
+        existingUser.isVerified = true;
+        existingUser.otp = undefined;
+        existingUser.otpExpiry = undefined;
+        await existingUser.save();
+      }
+
+      await PendingRegistration.deleteOne({ _id: pending._id });
+
+      const token = jwt.sign(
+        { userId: user._id },
+        process.env.JWT_SECRET,
+        { expiresIn: '90d' }
+      );
+
+      return res.json({
+        message: 'Email verified. Account created.',
+        token,
+        user: {
+          userId: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName
+        }
+      });
+    }
+
+    const user = existingUser;
+    if (!user) return res.status(404).json({ message: 'No pending registration found. Please register again.' });
 
     if (!user.otp || !user.otpExpiry) {
       return res.status(400).json({ message: 'No OTP found. Please register again.' });
@@ -103,6 +146,7 @@ router.post('/verify-otp', otpLimiter, async (req, res) => {
     }
 
     if (new Date() > user.otpExpiry) {
+      await User.deleteOne({ _id: user._id, isVerified: false });
       return res.status(400).json({ message: 'OTP expired' });
     }
 
@@ -118,7 +162,7 @@ router.post('/verify-otp', otpLimiter, async (req, res) => {
       { expiresIn: '90d' }
     );
 
-    res.json({
+    return res.json({
       message: 'Email verified',
       token,
       user: {
@@ -130,7 +174,10 @@ router.post('/verify-otp', otpLimiter, async (req, res) => {
     });
 
   } catch (err) {
-    console.log(err);
+    console.error('Verify OTP failed:', {
+      message: err?.message || err,
+      stack: err?.stack || err,
+    });
     res.status(500).json({ message: 'Verification failed', error: err.message });
   }
 });
@@ -142,33 +189,60 @@ router.post('/resend-otp', otpLimiter, async (req, res) => {
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    if (user.isVerified) {
+    const existingUser = await User.findOne({ email });
+    if (existingUser?.isVerified) {
       return res.status(400).json({ message: 'Already verified' });
     }
 
+    const pending = await PendingRegistration.findOne({ email });
+    if (!pending && !existingUser) {
+      return res.status(404).json({ message: 'No pending registration found. Please register again.' });
+    }
+
     const otp = makeOTP();
+    const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
 
-    user.otp = hashOTP(otp);
-    user.otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+    const previousPending = pending
+      ? { otp: pending.otp, otpExpiry: pending.otpExpiry, expiresAt: pending.expiresAt }
+      : null;
+    const previousUser = existingUser
+      ? { otp: existingUser.otp, otpExpiry: existingUser.otpExpiry }
+      : null;
 
-    await user.save();
+    if (pending) {
+      pending.otp = hashOTP(otp);
+      pending.otpExpiry = otpExpiry;
+      pending.expiresAt = otpExpiry;
+      await pending.save();
+    } else {
+      existingUser.otp = hashOTP(otp);
+      existingUser.otpExpiry = otpExpiry;
+      await existingUser.save();
+    }
 
     try {
       await sendOTP(email, otp);
     } catch (emailError) {
-      user.otp = undefined;
-      user.otpExpiry = undefined;
-      await user.save();
+      if (pending && previousPending) {
+        pending.otp = previousPending.otp;
+        pending.otpExpiry = previousPending.otpExpiry;
+        pending.expiresAt = previousPending.expiresAt;
+        await pending.save();
+      } else if (existingUser && previousUser) {
+        existingUser.otp = previousUser.otp;
+        existingUser.otpExpiry = previousUser.otpExpiry;
+        await existingUser.save();
+      }
       throw emailError;
     }
 
     res.json({ message: 'New OTP sent' });
 
   } catch (err) {
-    console.log(err);
+    console.error('Resend OTP failed:', {
+      message: err?.message || err,
+      stack: err?.stack || err,
+    });
     res.status(500).json({ message: 'Resend failed', error: err.message });
   }
 });
@@ -178,7 +252,8 @@ router.post('/resend-otp', otpLimiter, async (req, res) => {
 // =========================================================
 router.post('/login', authLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const { password } = req.body;
 
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -207,7 +282,10 @@ router.post('/login', authLimiter, async (req, res) => {
     });
 
   } catch (err) {
-    console.log(err);
+    console.error('Login failed:', {
+      message: err?.message || err,
+      stack: err?.stack || err,
+    });
     res.status(500).json({ message: 'Login failed', error: err.message });
   }
 });
@@ -241,7 +319,10 @@ router.post('/forgot-password', otpLimiter, async (req, res) => {
     res.json({ message: 'Reset OTP sent' });
 
   } catch (err) {
-    console.log(err);
+    console.error('Forgot password OTP failed:', {
+      message: err?.message || err,
+      stack: err?.stack || err,
+    });
     res.status(500).json({ message: 'Failed to send OTP', error: err.message });
   }
 });
@@ -251,7 +332,12 @@ router.post('/forgot-password', otpLimiter, async (req, res) => {
 // =========================================================
 router.post('/reset-password', otpLimiter, async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const { otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'Email, OTP and new password are required' });
+    }
 
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -279,7 +365,10 @@ router.post('/reset-password', otpLimiter, async (req, res) => {
     res.json({ message: 'Password reset successful' });
 
   } catch (err) {
-    console.log(err);
+    console.error('Reset password failed:', {
+      message: err?.message || err,
+      stack: err?.stack || err,
+    });
     res.status(500).json({ message: 'Reset failed', error: err.message });
   }
 });
