@@ -349,8 +349,14 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       }, { new: true }).lean() || bill;
     }
 
+    const responseMessage = billForResponse.deliveryStatus === 'failed'
+      ? `Bill generated, but email delivery failed for ${billForResponse.failedCount || recipients.length} member(s).`
+      : billForResponse.deliveryStatus === 'partial'
+        ? `Bill generated and partially sent (${billForResponse.sentCount || 0}/${recipients.length} member(s)).`
+        : `Bill queued for ${recipients.length} member(s). You can send another bill anytime.`;
+
     res.status(202).json({
-      message: `Bill queued for ${recipients.length} member(s). You can send another bill anytime.`,
+      message: responseMessage,
       bill: billForResponse,
       totalBill,
       perMeal,

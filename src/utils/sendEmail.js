@@ -1,7 +1,10 @@
 const nodemailer = require('nodemailer');
 
 const emailConfig = {
-  service: 'gmail',
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+  requireTLS: true,
   pool: true,
   maxConnections: 3,
   maxMessages: 50,
@@ -46,7 +49,10 @@ const logEmailError = (label, error) => {
 
 const verifySmtpConnection = async (label) => {
   console.log(`[email:${label}] SMTP config:`, {
-    service: emailConfig.service,
+    host: emailConfig.host,
+    port: emailConfig.port,
+    secure: emailConfig.secure,
+    requireTLS: emailConfig.requireTLS,
     pool: emailConfig.pool,
     maxConnections: emailConfig.maxConnections,
     maxMessages: emailConfig.maxMessages,
