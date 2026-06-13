@@ -47,8 +47,10 @@ async function deliverBillEmails({
     });
   });
 
-  const jobs = validRecipients
-    .map(async recipient => {
+  const results = [];
+
+  for (const recipient of validRecipients) {
+    try {
       console.log('Bill email PDF generation started:', {
         email: recipient.email,
         name: recipient.name,
@@ -97,10 +99,13 @@ async function deliverBillEmails({
         messageId: info?.messageId,
       });
 
-      return recipient.email;
-    });
+      results.push({ status: 'fulfilled', value: recipient.email });
+    } catch (error) {
+      results.push({ status: 'rejected', reason: error });
+      continue;
+    }
+  }
 
-  const results = await Promise.allSettled(jobs);
   const failures = results
     .filter(result => result.status === 'rejected')
     .map(result => result.reason);

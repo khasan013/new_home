@@ -17,9 +17,12 @@ const emailConfig = {
   },
 };
 
-const transporter = nodemailer.createTransport({
+const createEmailTransporter = (overrides = {}) => nodemailer.createTransport({
   ...emailConfig,
+  ...overrides,
 });
+
+const transporter = createEmailTransporter();
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -106,11 +109,21 @@ const sendMailWithLogging = async (label, mailOptions) => {
     throw new Error(`Invalid recipient email: ${mailOptions.to || '(empty)'}`);
   }
 
-  await verifySmtpConnection(label);
+  const activeTransporter = label === 'bill'
+    ? createEmailTransporter({ pool: false })
+    : transporter;
 
   try {
+    if (label === 'bill') {
+      console.log(`[email:${label}] SMTP connection verify started`);
+      await activeTransporter.verify();
+      console.log(`[email:${label}] SMTP connection verify succeeded:`, true);
+    } else {
+      await verifySmtpConnection(label);
+    }
+
     console.log(`[email:${label}] sendMail request started`);
-    const info = await transporter.sendMail(mailOptions);
+    const info = await activeTransporter.sendMail(mailOptions);
     console.log(`[email:${label}] sendMail response:`, {
       accepted: info.accepted,
       rejected: info.rejected,
@@ -123,6 +136,11 @@ const sendMailWithLogging = async (label, mailOptions) => {
   } catch (error) {
     logEmailError(label, error);
     throw error;
+  } finally {
+    if (label === 'bill' && activeTransporter.close) {
+      activeTransporter.close();
+      console.log(`[email:${label}] SMTP connection closed`);
+    }
   }
 };
 
