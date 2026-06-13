@@ -9,6 +9,7 @@ const rateLimit = require('../middleware/rateLimit');
 const router = express.Router();
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 25, keyPrefix: 'auth' });
 const otpLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, keyPrefix: 'otp' });
+const OTP_TTL_MS = 10 * 60 * 1000;
 
 // ── Helper: generate 6-digit OTP ──────────────────────────
 // makeOTP is imported from utils/otp so OTP generation uses crypto.randomInt.
@@ -18,30 +19,58 @@ const otpLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, keyPrefix: 'otp
 // =========================================================
 router.post('/register', authLimiter, async (req, res) => {
   try {
-    const { email, password, firstName, lastName } = req.body;
+    const { password, firstName, lastName } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
 
     if (!email || !password || !firstName) {
       return res.status(400).json({ message: 'Email, password and first name are required' });
     }
 
     const existing = await User.findOne({ email });
-    if (existing) {
+    if (existing?.isVerified) {
       return res.status(400).json({ message: 'Email already in use' });
     }
 
     const hash = await bcrypt.hash(password, 10);
     const otp  = makeOTP();
+    const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
 
-    await User.create({
-      email,
-      password: hash,
-      firstName,
-      lastName,
-      otp: hashOTP(otp),
-      otpExpiry: new Date(Date.now() + 10 * 60 * 1000),
-    });
+    let user = existing;
+    let createdUser = false;
 
-    await sendOTP(email, otp);
+    if (user) {
+      user.password = hash;
+      user.firstName = firstName;
+      user.lastName = lastName;
+      user.otp = hashOTP(otp);
+      user.otpExpiry = otpExpiry;
+      user.resetOtp = undefined;
+      user.resetOtpExpiry = undefined;
+      await user.save();
+    } else {
+      user = await User.create({
+        email,
+        password: hash,
+        firstName,
+        lastName,
+        otp: hashOTP(otp),
+        otpExpiry,
+      });
+      createdUser = true;
+    }
+
+    try {
+      await sendOTP(email, otp);
+    } catch (emailError) {
+      if (createdUser) {
+        await User.deleteOne({ _id: user._id });
+      } else {
+        user.otp = undefined;
+        user.otpExpiry = undefined;
+        await user.save();
+      }
+      throw emailError;
+    }
 
     res.json({ message: 'Registered. Check your email for verification code.' });
 
@@ -111,7 +140,7 @@ router.post('/verify-otp', otpLimiter, async (req, res) => {
 // =========================================================
 router.post('/resend-otp', otpLimiter, async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
 
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -123,11 +152,18 @@ router.post('/resend-otp', otpLimiter, async (req, res) => {
     const otp = makeOTP();
 
     user.otp = hashOTP(otp);
-    user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    user.otpExpiry = new Date(Date.now() + OTP_TTL_MS);
 
     await user.save();
 
-    await sendOTP(email, otp);
+    try {
+      await sendOTP(email, otp);
+    } catch (emailError) {
+      user.otp = undefined;
+      user.otpExpiry = undefined;
+      await user.save();
+      throw emailError;
+    }
 
     res.json({ message: 'New OTP sent' });
 
@@ -181,7 +217,7 @@ router.post('/login', authLimiter, async (req, res) => {
 // =========================================================
 router.post('/forgot-password', otpLimiter, async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
 
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -189,11 +225,18 @@ router.post('/forgot-password', otpLimiter, async (req, res) => {
     const otp = makeOTP();
 
     user.resetOtp = hashOTP(otp);
-    user.resetOtpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    user.resetOtpExpiry = new Date(Date.now() + OTP_TTL_MS);
 
     await user.save();
 
-    await sendOTP(email, otp, { purpose: 'password-reset' });
+    try {
+      await sendOTP(email, otp, { purpose: 'password-reset' });
+    } catch (emailError) {
+      user.resetOtp = undefined;
+      user.resetOtpExpiry = undefined;
+      await user.save();
+      throw emailError;
+    }
 
     res.json({ message: 'Reset OTP sent' });
 

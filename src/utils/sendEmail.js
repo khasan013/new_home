@@ -104,6 +104,18 @@ const verifySmtpConnection = async (label) => {
   return smtpVerifyPromise;
 };
 
+const ensureSmtpConfigured = (label) => {
+  logProviderConfig(label);
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error('EMAIL_USER and EMAIL_PASS must be configured before sending email');
+  }
+
+  if (!isValidEmail(senderEmail)) {
+    throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
+  }
+};
+
 const verifyEmailTransporter = async () => verifySmtpConnection('startup');
 
 const verifyEmailProvider = async () => {
@@ -226,7 +238,7 @@ const sendMailWithLogging = async (label, mailOptions) => {
       await activeTransporter.verify();
       console.log(`[email:${label}] SMTP connection verify succeeded:`, true);
     } else {
-      await verifySmtpConnection(label);
+      ensureSmtpConfigured(label);
     }
 
     console.log(`[email:${label}] sendMail request started`);
