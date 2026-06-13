@@ -152,6 +152,11 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     breakdown,
     costSummary,
   });
+  const deliveryStatus = failed === 0
+    ? 'sent'
+    : sent === 0
+      ? 'failed'
+      : 'partial';
 
   const adminMember = fullHome.members.find(member => member.role === 'admin' && member.user)
     || fullHome.members.find(member => member.user);
@@ -172,6 +177,9 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       perEgg,
       perMeal,
       sentCount: sent,
+      failedCount: failed,
+      deliveryStatus,
+      deliveryCompletedAt: new Date(),
       sentBy: adminMember?.user?._id || adminMember?.user,
       breakdown,
       costSummary,

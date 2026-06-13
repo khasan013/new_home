@@ -76,6 +76,19 @@ const billSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  failedCount: {
+    type: Number,
+    default: 0,
+  },
+  deliveryStatus: {
+    type: String,
+    enum: ['queued', 'sending', 'sent', 'partial', 'failed'],
+    default: 'queued',
+    index: true,
+  },
+  deliveryCompletedAt: {
+    type: Date,
+  },
   sentBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

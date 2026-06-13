@@ -250,17 +250,6 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
         };
       });
 
-    const { sent, failed } = await deliverBillEmails({
-      recipients,
-      homeName: fullHome.name,
-      month,
-      totalBill,
-      totalMeals,
-      perMeal,
-      breakdown,
-      costSummary,
-    });
-
     const bill = await Bill.create({
       homeId: req.params.homeId,
       month,
@@ -274,22 +263,60 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       totalBill,
       perEgg,
       perMeal,
-      sentCount: sent,
+      sentCount: 0,
+      failedCount: 0,
+      deliveryStatus: 'queued',
       sentBy: req.user.userId,
       breakdown,
       costSummary,
     });
 
-    res.json({
-      message: failed
-        ? `Bill saved. Sent to ${sent} member(s), ${failed} email(s) failed`
-        : `Bills sent to ${sent} member(s)`,
+    res.status(202).json({
+      message: `Bill queued for ${recipients.length} member(s). You can send another bill anytime.`,
       bill,
       totalBill,
       perMeal,
       breakdown,
-      failed,
+      queued: recipients.length,
     });
+
+    void (async () => {
+      try {
+        await Bill.findByIdAndUpdate(bill._id, { deliveryStatus: 'sending' });
+
+        const { sent, failed } = await deliverBillEmails({
+          recipients,
+          homeName: fullHome.name,
+          month,
+          totalBill,
+          totalMeals,
+          perMeal,
+          breakdown,
+          costSummary,
+        });
+
+        const deliveryStatus = failed === 0
+          ? 'sent'
+          : sent === 0
+            ? 'failed'
+            : 'partial';
+
+        await Bill.findByIdAndUpdate(bill._id, {
+          sentCount: sent,
+          failedCount: failed,
+          deliveryStatus,
+          deliveryCompletedAt: new Date(),
+        });
+      } catch (deliveryError) {
+        console.error('BACKGROUND BILL DELIVERY ERROR:', deliveryError);
+        await Bill.findByIdAndUpdate(bill._id, {
+          deliveryStatus: 'failed',
+          deliveryCompletedAt: new Date(),
+        }).catch(updateError => {
+          console.error('FAILED TO UPDATE BILL DELIVERY STATUS:', updateError);
+        });
+      }
+    })();
   } catch (err) {
     console.error('BILL SEND ERROR:', err);
     res.status(err.status || 500).json({ message: err.message });
