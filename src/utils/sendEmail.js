@@ -1,5 +1,3 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns');
 console.log('=== SEND EMAIL FILE LOADED ===');
 console.log('=== VERSION 1 ===');
 
@@ -10,81 +8,6 @@ const RESEND_API_URL = 'https://api.resend.com/emails';
 const EMAIL_RETRY_ATTEMPTS = Math.max(Number(process.env.EMAIL_RETRY_ATTEMPTS || 3), 1);
 const EMAIL_RETRY_BASE_DELAY_MS = Math.max(Number(process.env.EMAIL_RETRY_BASE_DELAY_MS || 750), 0);
 const RESEND_TIMEOUT_MS = Math.max(Number(process.env.RESEND_TIMEOUT_MS || 15000), 1000);
-const SMTP_FORCE_IPV4 = String(process.env.SMTP_FORCE_IPV4 || 'true').toLowerCase() !== 'false';
-const SMTP_DNS_TIMEOUT_MS = Math.max(Number(process.env.SMTP_DNS_TIMEOUT_MS || 5000), 1000);
-
-const smtpLookup = (hostname, options, callback) => {
-  const lookupOptions = {
-    ...options,
-    family: SMTP_FORCE_IPV4 ? 4 : options?.family,
-    all: false,
-    
-  };
-
-  console.log('[email:smtp-lookup] resolving SMTP host', {
-    hostname,
-    requestedFamily: lookupOptions.family || 'any',
-    ipv4Forced: SMTP_FORCE_IPV4,
-    nodeDefaultResultOrder: 'ipv4first',
-  });
-
-  dns.lookup(hostname, lookupOptions, (error, address, family) => {
-    if (error) {
-      console.error('[email:smtp-lookup] SMTP host resolution failed', {
-        hostname,
-        requestedFamily: lookupOptions.family || 'any',
-        message: error.message,
-        code: error.code,
-      });
-      return callback(error);
-    }
-    console.log('[email:smtp-lookup] SMTP host resolved', {
-      hostname,
-      address,
-      family: family === 4 ? 'IPv4' : 'IPv6',
-      ipv4Forced: SMTP_FORCE_IPV4,
-    });
-
-    return callback(null, address, family);
-  });
-  console.log('[email:smtp-lookup] CALLED', {
-  hostname,
-  options,
-});
-};
-
-const emailConfig = {
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true'
-    || Number(process.env.SMTP_PORT || 587) === 465,
-  requireTLS: Number(process.env.SMTP_PORT || 587) !== 465,
-  family: SMTP_FORCE_IPV4 ? 4 : undefined,
-  lookup: smtpLookup,
-  dnsTimeout: SMTP_DNS_TIMEOUT_MS,
-  pool: true,
-  maxConnections: Number(process.env.SMTP_MAX_CONNECTIONS || 3),
-  maxMessages: Number(process.env.SMTP_MAX_MESSAGES || 50),
-  connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
-  greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
-  socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-};
-const createEmailTransporter = (overrides = {}) => nodemailer.createTransport({
-  ...emailConfig,
-  ...overrides,
-});
-
-const transporter = createEmailTransporter();
-console.log('TRANSPORT CONFIG', {
-  host: emailConfig.host,
-  port: emailConfig.port,
-  family: emailConfig.family,
-  hasLookup: typeof emailConfig.lookup === 'function',
-});
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -98,12 +21,9 @@ const senderEmail = configuredSenderEmail && configuredSenderEmail !== 'noreply@
   ? configuredSenderEmail
   : process.env.EMAIL_USER;
 const sender = `"MealMate" <${senderEmail}>`;
-let smtpVerifyPromise = null;
 const hasResendApiKey = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 'kkkk');
 const emailProvider = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
-const activeEmailProvider = emailProvider === 'resend' || (emailProvider === 'auto' && hasResendApiKey)
-  ? 'resend'
-  : 'smtp';
+const activeEmailProvider = 'resend';
 
 const isValidEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
@@ -123,9 +43,6 @@ const logProviderConfig = (label) => {
     activeEmailProvider,
     requestedEmailProvider: emailProvider,
     hasResendApiKey,
-    smtpHost: emailConfig.host,
-    smtpPort: emailConfig.port,
-    smtpSecure: emailConfig.secure,
     hasEmailUser: Boolean(process.env.EMAIL_USER),
     hasEmailPass: Boolean(process.env.EMAIL_PASS),
     hasEmailFrom: Boolean(process.env.EMAIL_FROM),
@@ -178,100 +95,23 @@ const withEmailRetries = async (label, operation) => {
   throw lastError;
 };
 
-const verifySmtpConnection = async (label) => {
-dns.lookup('smtp.gmail.com', { all: true }, (err, addresses) => {
-
-  console.log('GMAIL DNS RESULTS', err, addresses);
-
-});
-dns.lookup('smtp.gmail.com', { family: 4 }, (err, address) => {
-
-  console.log('GMAIL IPV4', err, address);
-
-});
-
-  logProviderConfig(label);
-
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    throw new Error('EMAIL_USER and EMAIL_PASS must be configured before sending email');
-  }
-
-  if (!isValidEmail(senderEmail)) {
-    throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
-  }
-
-  if (!smtpVerifyPromise) {
-    console.log(`[email:${label}] SMTP connection verify started`);
-    const net = require('net');
-
-const socket = net.connect({
-  host: '74.125.130.108',
-  port: 587,
-  family: 4,
-});
-
-socket.on('connect', () => {
-  console.log('RAW IPV4 CONNECT SUCCESS');
-  socket.destroy();
-});
-
-socket.on('error', err => {
-  console.log('RAW IPV4 CONNECT ERROR', err);
-});
-
-socket.setTimeout(10000, () => {
-  console.log('RAW IPV4 CONNECT TIMEOUT');
-  socket.destroy();
-});
-    smtpVerifyPromise = transporter.verify()
-      .then(result => {
-        console.log(`[email:${label}] SMTP connection verify succeeded:`, result);
-        return result;
-      })
-      .catch(error => {
-        smtpVerifyPromise = null;
-        logEmailError(label, error);
-        throw error;
-      });
-  } else {
-    console.log(`[email:${label}] SMTP connection verify using cached successful connection`);
-  }
-
-  return smtpVerifyPromise;
-};
-
-const ensureSmtpConfigured = (label) => {
-  logProviderConfig(label);
-
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    throw new Error('EMAIL_USER and EMAIL_PASS must be configured before sending email');
-  }
-
-  if (!isValidEmail(senderEmail)) {
-    throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
-  }
-};
-
-const verifyEmailTransporter = async () => verifySmtpConnection('startup');
-
 const verifyEmailProvider = async () => {
   logProviderConfig('startup');
-
-  if (activeEmailProvider === 'resend') {
-    if (!hasResendApiKey) {
-      throw new Error('RESEND_API_KEY must be configured when EMAIL_PROVIDER is resend');
-    }
-    if (!configuredSenderEmail || configuredSenderEmail === 'noreply@yourapp.com') {
-      throw new Error('EMAIL_FROM must be set to a verified sender address when using Resend');
-    }
-    if (!isValidEmail(senderEmail)) {
-      throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
-    }
-    console.log('[email:startup] Resend HTTPS provider configured');
-    return true;
+  if (!hasResendApiKey) {
+    throw new Error('RESEND_API_KEY must be configured');
   }
 
-  return verifySmtpConnection('startup');
+  if (!configuredSenderEmail) {
+    throw new Error('EMAIL_FROM must be configured');
+  }
+
+  if (!isValidEmail(senderEmail)) {
+    throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
+  }
+
+  console.log('[email:startup] Resend HTTPS provider configured');
+
+  return true;
 };
 
 const normalizeRecipients = to => Array.isArray(to) ? to : [to];
@@ -366,25 +206,10 @@ const sendMailWithLogging = async (label, mailOptions) => {
     throw new Error(`Invalid recipient email: ${mailOptions.to || '(empty)'}`);
   }
 
-  if (activeEmailProvider === 'resend') {
-    return withEmailRetries(label, () => sendWithResend(label, mailOptions));
-  }
-
-  ensureSmtpConfigured(label);
-
-  return withEmailRetries(label, async () => {
-    console.log(`[email:${label}] sendMail request started`);
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`[email:${label}] sendMail response:`, {
-      accepted: info.accepted,
-      rejected: info.rejected,
-      pending: info.pending,
-      response: info.response,
-      messageId: info.messageId,
-      envelope: info.envelope,
-    });
-    return info;
-  });
+  return withEmailRetries(
+  label,
+  () => sendWithResend(label, mailOptions)
+);
 };
 
 const sendOTP = async (to, otp, options = {}) => {
@@ -526,4 +351,4 @@ const sendBillEmail = async ({
   });
 };
 
-module.exports = { sendOTP, sendReportEmail, sendBillEmail, verifyEmailTransporter, verifyEmailProvider };
+module.exports = { sendOTP, sendReportEmail, sendBillEmail, verifyEmailProvider };
