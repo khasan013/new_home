@@ -15,6 +15,7 @@ const smtpLookup = (hostname, options, callback) => {
     ...options,
     family: SMTP_FORCE_IPV4 ? 4 : options?.family,
     all: false,
+    
   };
 
   console.log('[email:smtp-lookup] resolving SMTP host', {
@@ -44,6 +45,10 @@ const smtpLookup = (hostname, options, callback) => {
 
     return callback(null, address, family);
   });
+  console.log('[email:smtp-lookup] CALLED', {
+  hostname,
+  options,
+});
 };
 
 const emailConfig = {
