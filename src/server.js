@@ -11,7 +11,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const { verifyEmailTransporter } = require('./utils/sendEmail');
+const { verifyEmailProvider } = require('./utils/sendEmail');
 require('./jobs/monthlyBill');
 
 const app = express();
@@ -210,7 +210,17 @@ const PORT = process.env.PORT || 8080;
 async function startServer() {
   try {
     await connectDB();
-    await verifyEmailTransporter();
+
+    try {
+      await verifyEmailProvider();
+    } catch (emailError) {
+      console.error('❌ Email provider startup verification failed:', {
+        message: emailError?.message || emailError,
+        stack: emailError?.stack || emailError,
+        code: emailError?.code,
+        command: emailError?.command,
+      });
+    }
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

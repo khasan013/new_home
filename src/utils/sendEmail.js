@@ -1,5 +1,7 @@
 const nodemailer = require('nodemailer');
 
+const RESEND_API_URL = 'https://api.resend.com/emails';
+
 const emailConfig = {
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: Number(process.env.SMTP_PORT || 587),
@@ -38,6 +40,11 @@ const senderEmail = configuredSenderEmail && configuredSenderEmail !== 'noreply@
   : process.env.EMAIL_USER;
 const sender = `"MealMate" <${senderEmail}>`;
 let smtpVerifyPromise = null;
+const hasResendApiKey = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 'kkkk');
+const emailProvider = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
+const activeEmailProvider = emailProvider === 'resend' || (emailProvider === 'auto' && hasResendApiKey)
+  ? 'resend'
+  : 'smtp';
 
 const isValidEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
@@ -50,15 +57,14 @@ const logEmailError = (label, error) => {
   if (error?.command) console.error(`[email:${label}] failed SMTP command:`, error.command);
 };
 
-const verifySmtpConnection = async (label) => {
-  console.log(`[email:${label}] SMTP config:`, {
-    host: emailConfig.host,
-    port: emailConfig.port,
-    secure: emailConfig.secure,
-    requireTLS: emailConfig.requireTLS,
-    pool: emailConfig.pool,
-    maxConnections: emailConfig.maxConnections,
-    maxMessages: emailConfig.maxMessages,
+const logProviderConfig = (label) => {
+  console.log(`[email:${label}] provider config:`, {
+    activeEmailProvider,
+    requestedEmailProvider: emailProvider,
+    hasResendApiKey,
+    smtpHost: emailConfig.host,
+    smtpPort: emailConfig.port,
+    smtpSecure: emailConfig.secure,
     hasEmailUser: Boolean(process.env.EMAIL_USER),
     emailUser: process.env.EMAIL_USER || null,
     hasEmailPass: Boolean(process.env.EMAIL_PASS),
@@ -66,6 +72,10 @@ const verifySmtpConnection = async (label) => {
     emailFrom: process.env.EMAIL_FROM || null,
     senderEmail,
   });
+};
+
+const verifySmtpConnection = async (label) => {
+  logProviderConfig(label);
 
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     throw new Error('EMAIL_USER and EMAIL_PASS must be configured before sending email');
@@ -96,6 +106,92 @@ const verifySmtpConnection = async (label) => {
 
 const verifyEmailTransporter = async () => verifySmtpConnection('startup');
 
+const verifyEmailProvider = async () => {
+  logProviderConfig('startup');
+
+  if (activeEmailProvider === 'resend') {
+    if (!hasResendApiKey) {
+      throw new Error('RESEND_API_KEY must be configured when EMAIL_PROVIDER is resend');
+    }
+    if (!configuredSenderEmail || configuredSenderEmail === 'noreply@yourapp.com') {
+      throw new Error('EMAIL_FROM must be set to a verified sender address when using Resend');
+    }
+    if (!isValidEmail(senderEmail)) {
+      throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
+    }
+    console.log('[email:startup] Resend HTTPS provider configured');
+    return true;
+  }
+
+  return verifySmtpConnection('startup');
+};
+
+const normalizeRecipients = to => Array.isArray(to) ? to : [to];
+
+const toResendAttachments = attachments => (attachments || []).map(attachment => ({
+  filename: attachment.filename,
+  content: Buffer.isBuffer(attachment.content)
+    ? attachment.content.toString('base64')
+    : attachment.content,
+}));
+
+const sendWithResend = async (label, mailOptions) => {
+  if (!hasResendApiKey) {
+    throw new Error('RESEND_API_KEY is not configured');
+  }
+  if (!configuredSenderEmail || configuredSenderEmail === 'noreply@yourapp.com') {
+    throw new Error('EMAIL_FROM must be set to a verified sender address when using Resend');
+  }
+
+  console.log(`[email:${label}] Resend HTTPS send request started`);
+
+  const response = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: sender,
+      to: normalizeRecipients(mailOptions.to),
+      subject: mailOptions.subject,
+      text: mailOptions.text,
+      html: mailOptions.html,
+      attachments: toResendAttachments(mailOptions.attachments),
+    }),
+  });
+
+  const data = await response.json().catch(() => null);
+
+  console.log(`[email:${label}] Resend HTTPS response:`, {
+    status: response.status,
+    ok: response.ok,
+    data,
+  });
+
+  if (!response.ok) {
+    const message = data?.message || data?.error || `Resend send failed (${response.status})`;
+    const error = Object.assign(new Error(message), {
+      response: data,
+      responseCode: response.status,
+      code: 'RESEND_SEND_FAILED',
+    });
+    throw error;
+  }
+
+  return {
+    accepted: normalizeRecipients(mailOptions.to),
+    rejected: [],
+    response: `Resend accepted email ${data?.id || ''}`.trim(),
+    messageId: data?.id,
+    envelope: {
+      from: senderEmail,
+      to: normalizeRecipients(mailOptions.to),
+    },
+    provider: 'resend',
+  };
+};
+
 const sendMailWithLogging = async (label, mailOptions) => {
   console.log(`[email:${label}] recipient email:`, mailOptions.to);
   console.log(`[email:${label}] email subject:`, mailOptions.subject);
@@ -109,6 +205,15 @@ const sendMailWithLogging = async (label, mailOptions) => {
 
   if (!isValidEmail(mailOptions.to)) {
     throw new Error(`Invalid recipient email: ${mailOptions.to || '(empty)'}`);
+  }
+
+  if (activeEmailProvider === 'resend') {
+    try {
+      return await sendWithResend(label, mailOptions);
+    } catch (error) {
+      logEmailError(label, error);
+      throw error;
+    }
   }
 
   const activeTransporter = label === 'bill'
@@ -285,4 +390,4 @@ const sendBillEmail = async ({
   });
 };
 
-module.exports = { sendOTP, sendReportEmail, sendBillEmail, verifyEmailTransporter };
+module.exports = { sendOTP, sendReportEmail, sendBillEmail, verifyEmailTransporter, verifyEmailProvider };
