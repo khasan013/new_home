@@ -46,7 +46,7 @@ const sender = `"MealMate" <${senderEmail}>`;
 let smtpVerifyPromise = null;
 const hasResendApiKey = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 'kkkk');
 const emailProvider = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
-const activeEmailProvider = emailProvider === 'resend'
+const activeEmailProvider = emailProvider === 'resend' || (emailProvider === 'auto' && hasResendApiKey)
   ? 'resend'
   : 'smtp';
 

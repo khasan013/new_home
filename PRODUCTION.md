@@ -9,7 +9,7 @@ This backend is still a modular monolith. Keep it that way until traffic or team
 - `EMAIL_USER`
 - `EMAIL_PASS`
 - `EMAIL_FROM`
-- `EMAIL_PROVIDER`: use `smtp` for Gmail SMTP, or `resend` only after the sender domain is verified
+- `EMAIL_PROVIDER`: set `smtp` to send from the Gmail account in `EMAIL_USER`; `auto` uses Resend when `RESEND_API_KEY` exists, otherwise SMTP
 - `SMTP_HOST`, defaults to `smtp.gmail.com`
 - `SMTP_PORT`, defaults to `587`
 - `SMTP_SECURE`, set `true` only for port `465`
@@ -23,7 +23,7 @@ For Gmail SMTP, `EMAIL_USER` must be the Gmail account and `EMAIL_PASS` must be 
 
 For Resend, set `EMAIL_PROVIDER=resend`, set `RESEND_API_KEY`, and set `EMAIL_FROM` to an address on a verified domain. Configure the domain DNS records that Resend provides: SPF/TXT, DKIM/TXT or CNAME, and DMARC/TXT. Do not use an unverified Gmail address as `EMAIL_FROM` with Resend.
 
-Keep `EMAIL_PROVIDER=smtp` on Render unless you have completed Resend domain verification. Stale or test Resend keys should be removed from Render to avoid confusing deployments.
+Set `EMAIL_PROVIDER=smtp` on Render when sending from the personal Gmail account. Use Resend only after domain verification is complete.
 
 Useful tuning knobs:
 
