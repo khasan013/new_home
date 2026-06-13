@@ -1,9 +1,50 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+dns.setDefaultResultOrder('ipv4first');
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 const EMAIL_RETRY_ATTEMPTS = Math.max(Number(process.env.EMAIL_RETRY_ATTEMPTS || 3), 1);
 const EMAIL_RETRY_BASE_DELAY_MS = Math.max(Number(process.env.EMAIL_RETRY_BASE_DELAY_MS || 750), 0);
 const RESEND_TIMEOUT_MS = Math.max(Number(process.env.RESEND_TIMEOUT_MS || 15000), 1000);
+const SMTP_FORCE_IPV4 = String(process.env.SMTP_FORCE_IPV4 || 'true').toLowerCase() !== 'false';
+const SMTP_DNS_TIMEOUT_MS = Math.max(Number(process.env.SMTP_DNS_TIMEOUT_MS || 5000), 1000);
+
+const smtpLookup = (hostname, options, callback) => {
+  const lookupOptions = {
+    ...options,
+    family: SMTP_FORCE_IPV4 ? 4 : options?.family,
+    all: false,
+  };
+
+  console.log('[email:smtp-lookup] resolving SMTP host', {
+    hostname,
+    requestedFamily: lookupOptions.family || 'any',
+    ipv4Forced: SMTP_FORCE_IPV4,
+    nodeDefaultResultOrder: 'ipv4first',
+  });
+
+  dns.lookup(hostname, lookupOptions, (error, address, family) => {
+    if (error) {
+      console.error('[email:smtp-lookup] SMTP host resolution failed', {
+        hostname,
+        requestedFamily: lookupOptions.family || 'any',
+        message: error.message,
+        code: error.code,
+      });
+      return callback(error);
+    }
+
+    console.log('[email:smtp-lookup] SMTP host resolved', {
+      hostname,
+      address,
+      family: family === 4 ? 'IPv4' : 'IPv6',
+      ipv4Forced: SMTP_FORCE_IPV4,
+    });
+
+    return callback(null, address, family);
+  });
+};
 
 const emailConfig = {
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -11,6 +52,9 @@ const emailConfig = {
   secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true'
     || Number(process.env.SMTP_PORT || 587) === 465,
   requireTLS: Number(process.env.SMTP_PORT || 587) !== 465,
+  family: SMTP_FORCE_IPV4 ? 4 : undefined,
+  lookup: smtpLookup,
+  dnsTimeout: SMTP_DNS_TIMEOUT_MS,
   pool: true,
   maxConnections: Number(process.env.SMTP_MAX_CONNECTIONS || 3),
   maxMessages: Number(process.env.SMTP_MAX_MESSAGES || 50),
