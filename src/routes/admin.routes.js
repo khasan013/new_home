@@ -353,16 +353,22 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       ? `Bill generated, but email delivery failed for ${billForResponse.failedCount || recipients.length} member(s).`
       : billForResponse.deliveryStatus === 'partial'
         ? `Bill generated and partially sent (${billForResponse.sentCount || 0}/${recipients.length} member(s)).`
-        : `Bill queued for ${recipients.length} member(s). You can send another bill anytime.`;
+        : `Bill generated and emailed to ${billForResponse.sentCount || recipients.length} member(s).`;
 
-    res.status(202).json({
+    const responseBody = {
       message: responseMessage,
       bill: billForResponse,
       totalBill,
       perMeal,
       breakdown,
       queued: recipients.length,
-    });
+    };
+
+    if (billForResponse.deliveryStatus !== 'sent') {
+      return res.status(502).json(responseBody);
+    }
+
+    return res.status(200).json(responseBody);
   } catch (err) {
     console.error('BILL SEND ERROR:', err);
     res.status(err.status || 500).json({ message: err.message });

@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const { verifyEmailTransporter } = require('./utils/sendEmail');
 require('./jobs/monthlyBill');
 
 const app = express();
@@ -21,11 +22,19 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 // ── CORS Configuration ────────────────────────────────
-const allowedOrigins = [
+const defaultAllowedOrigins = [
   'https://www.khasan.live',
   'https://khasan.live',
   'https://home-three-khaki-60.vercel.app'
 ];
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+if (allowedOrigins.length === 0) {
+  allowedOrigins.push(...defaultAllowedOrigins);
+}
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -201,6 +210,7 @@ const PORT = process.env.PORT || 8080;
 async function startServer() {
   try {
     await connectDB();
+    await verifyEmailTransporter();
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

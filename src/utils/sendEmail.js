@@ -94,6 +94,8 @@ const verifySmtpConnection = async (label) => {
   return smtpVerifyPromise;
 };
 
+const verifyEmailTransporter = async () => verifySmtpConnection('startup');
+
 const sendMailWithLogging = async (label, mailOptions) => {
   console.log(`[email:${label}] recipient email:`, mailOptions.to);
   console.log(`[email:${label}] email subject:`, mailOptions.subject);
@@ -283,4 +285,4 @@ const sendBillEmail = async ({
   });
 };
 
-module.exports = { sendOTP, sendReportEmail, sendBillEmail };
+module.exports = { sendOTP, sendReportEmail, sendBillEmail, verifyEmailTransporter };
