@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const net = require('net');
 const { verifyEmailProvider } = require('./utils/sendEmail');
 require('./jobs/monthlyBill');
 
@@ -20,6 +21,39 @@ const app = express();
 app.use(helmet());
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+// ── Global Error Handler ──────────────────────────────
+app.get('/smtp-raw-test', (req, res) => {
+  const socket = net.createConnection(
+    {
+      host: '74.125.130.109',
+      port: 587,
+      family: 4,
+    },
+    () => {
+      socket.end();
+      res.json({
+        success: true,
+      });
+    }
+  );
+
+  socket.on('error', err => {
+    res.status(500).json({
+      success: false,
+      code: err.code,
+      message: err.message,
+    });
+  });
+
+  socket.setTimeout(10000, () => {
+    socket.destroy();
+
+    res.status(500).json({
+      success: false,
+      message: 'timeout',
+    });
+  });
+});
 
 // ── CORS Configuration ────────────────────────────────
 const defaultAllowedOrigins = [

@@ -79,7 +79,12 @@ const createEmailTransporter = (overrides = {}) => nodemailer.createTransport({
 });
 
 const transporter = createEmailTransporter();
-
+console.log('TRANSPORT CONFIG', {
+  host: emailConfig.host,
+  port: emailConfig.port,
+  family: emailConfig.family,
+  hasLookup: typeof emailConfig.lookup === 'function',
+});
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
