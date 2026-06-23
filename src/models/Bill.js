@@ -19,6 +19,10 @@ const billBreakdownSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  equalShare: {
+    type: Number,
+    default: 0,
+  },
 }, { _id: false });
 
 const billSchema = new mongoose.Schema({
@@ -53,6 +57,18 @@ const billSchema = new mongoose.Schema({
     default: 0,
   },
   otherCost: {
+    type: Number,
+    default: 0,
+  },
+  sharedCost: {
+    type: Number,
+    default: 0,
+  },
+  waterCost: {
+    type: Number,
+    default: 0,
+  },
+  perMemberShare: {
     type: Number,
     default: 0,
   },
@@ -101,6 +117,9 @@ const billSchema = new mongoose.Schema({
     consumedCost: { type: Number, default: 0 },
     remainingEggCost: { type: Number, default: 0 },
     other: { type: Number, default: 0 },
+    shared: { type: Number, default: 0 },
+    water: { type: Number, default: 0 },
+    perMemberShare: { type: Number, default: 0 },
   },
 }, { timestamps: true });
 

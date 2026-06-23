@@ -72,7 +72,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       homeId,
       createdAt: { $gte: periodStart, $lt: periodEnd },
     })
-      .select('amount category eggQty')
+      .select('amount category eggQty splitEqually')
       .lean(),
   ]);
 
@@ -83,7 +83,13 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     .filter(expense => expense.category === 'Egg')
     .reduce((sum, expense) => sum + (Number(expense.eggQty) || 0), 0);
   const otherCost = expenses
-    .filter(expense => expense.category !== 'Egg')
+    .filter(expense => expense.category !== 'Egg' && !expense.splitEqually)
+    .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+  const waterCost = expenses
+    .filter(expense => expense.category === 'WaterSupply' && expense.splitEqually)
+    .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+  const sharedCost = expenses
+    .filter(expense => expense.splitEqually)
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
 
   const totalMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
@@ -95,8 +101,9 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
   const perEgg = totalEggCount > 0 ? totalEggPrice / totalEggCount : 0;
   const consumedCost = consumedEgg * perEgg;
   const remainingEggCost = Math.max(totalEggPrice - consumedCost, 0);
-  const totalBill = remainingEggCost + otherCost;
-  const perMeal = totalBill / totalMeals;
+  const mealBasedBill = remainingEggCost + otherCost;
+  const totalBill = mealBasedBill + sharedCost;
+  const perMeal = mealBasedBill / totalMeals;
 
   const memberMap = {};
   for (const { user } of fullHome.members) {
@@ -109,6 +116,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       meals: 0,
       eggs: 0,
       share: 0,
+      equalShare: 0,
     };
   }
 
@@ -123,14 +131,19 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
         meals: 0,
         eggs: 0,
         share: 0,
+        equalShare: 0,
       };
     }
     memberMap[uid].meals += Number(meal.mealCount) || 0;
     memberMap[uid].eggs += Number(meal.eggsCount) || 0;
   }
 
+  const memberCount = Object.keys(memberMap).length;
+  const perMemberShare = memberCount > 0 ? sharedCost / memberCount : 0;
+
   Object.values(memberMap).forEach(member => {
-    member.share = (perMeal * member.meals) + (perEgg * member.eggs);
+    member.equalShare = perMemberShare;
+    member.share = (perMeal * member.meals) + (perEgg * member.eggs) + perMemberShare;
   });
 
   const breakdown = Object.values(memberMap);
@@ -140,6 +153,9 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     consumedCost,
     remainingEggCost,
     other: otherCost,
+    shared: sharedCost,
+    water: waterCost,
+    perMemberShare,
   };
 
   const { sent, failed } = await deliverBillEmails({
@@ -172,10 +188,13 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       totalEggCount,
       consumedEgg,
       otherCost,
+      sharedCost,
+      waterCost,
       totalMeals,
       totalBill,
       perEgg,
       perMeal,
+      perMemberShare,
       sentCount: sent,
       failedCount: failed,
       deliveryStatus,

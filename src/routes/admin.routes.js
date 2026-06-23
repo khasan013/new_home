@@ -187,6 +187,8 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const eggCount = Number(req.body.totalEggCount) || 0;
     const consumed = Number(req.body.consumedEgg) || 0;
     const other = Number(req.body.otherCost) || 0;
+    const shared = Number(req.body.sharedCost) || 0;
+    const water = Number(req.body.waterCost) || 0;
     const perEgg = Number(req.body.perEgg) || (eggCount > 0 ? eggPrice / eggCount : 0);
     const consumedCost = consumed * perEgg;
     const remainingEggCost = eggPrice - consumedCost;
@@ -207,13 +209,14 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
 
     const calculatedMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
     const totalMeals = Number(req.body.totalMeals) || calculatedMeals;
-    const totalBill = Number(req.body.totalBill) || (remainingEggCost + other);
+    const equalSplitCost = shared + water;
+    const totalBill = Number(req.body.totalBill) || (remainingEggCost + other + equalSplitCost);
 
     if (totalMeals <= 0) {
       return res.status(400).json({ message: 'No meals found for this bill' });
     }
 
-    if ([eggPrice, eggCount, consumed, other, perEgg, totalMeals, totalBill].some(value => Number.isNaN(value) || value < 0)) {
+    if ([eggPrice, eggCount, consumed, other, shared, water, perEgg, totalMeals, totalBill].some(value => Number.isNaN(value) || value < 0)) {
       return res.status(400).json({ message: 'Bill values must be valid positive numbers' });
     }
 
@@ -221,8 +224,24 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       console.warn('Meal mismatch:', calculatedMeals, totalMeals);
     }
 
-    const perMeal = totalBill / totalMeals;
+    const mealBasedBill = Math.max(totalBill - equalSplitCost, 0);
+    const perMeal = mealBasedBill / totalMeals;
     const memberMap = {};
+
+    fullHome.members.forEach(({ user }) => {
+      if (!user) return;
+      const uid = user._id.toString();
+      const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+      memberMap[uid] = {
+        userId: uid,
+        name,
+        email: user.email,
+        meals: 0,
+        eggs: 0,
+        share: 0,
+        equalShare: 0,
+      };
+    });
 
     for (const meal of meals) {
       if (!meal.userId) continue;
@@ -238,6 +257,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
           meals: 0,
           eggs: 0,
           share: 0,
+          equalShare: 0,
         };
       }
 
@@ -245,14 +265,18 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       memberMap[uid].eggs += Number(meal.eggsCount) || 0;
     }
 
+    const memberCount = Object.keys(memberMap).length;
+    const perMemberShare = memberCount > 0 ? equalSplitCost / memberCount : 0;
+
     Object.values(memberMap).forEach(member => {
       const mealCost = perMeal * member.meals;
       const eggCost = member.eggs * perEgg;
-      member.share = mealCost + eggCost;
+      member.equalShare = perMemberShare;
+      member.share = mealCost + eggCost + perMemberShare;
     });
 
     const breakdown = Object.values(memberMap);
-    const costSummary = { eggPrice, perEgg, consumedCost, remainingEggCost, other };
+    const costSummary = { eggPrice, perEgg, consumedCost, remainingEggCost, other, shared, water, perMemberShare };
 
     const recipients = fullHome.members
       .filter(({ user }) => user)
@@ -266,6 +290,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
           meals: entry?.meals || 0,
           eggs: entry?.eggs || 0,
           share: entry?.share || 0,
+          equalShare: entry?.equalShare || 0,
         };
       });
 
@@ -289,10 +314,13 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       totalEggCount: eggCount,
       consumedEgg: consumed,
       otherCost: other,
+      sharedCost: shared,
+      waterCost: water,
       totalMeals,
       totalBill,
       perEgg,
       perMeal,
+      perMemberShare,
       sentCount: 0,
       failedCount: 0,
       deliveryStatus: 'queued',

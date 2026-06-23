@@ -30,13 +30,31 @@ const expenseSchema = new mongoose.Schema({
   // 🔥 ADD THIS (REQUIRED FOR UI)
   category: {
     type: String,
-    enum: ['Grocery', 'Egg'],
+    enum: ['Grocery', 'Egg', 'SharedBill', 'WaterSupply'],
     required: true,
     default: 'Grocery'
   },
 
   // 🔥 ADD THIS (FOR EGG COUNT)
   eggQty: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  splitEqually: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+
+  bottlePrice: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  bottleQty: {
     type: Number,
     default: 0,
     min: 0
@@ -48,5 +66,7 @@ const expenseSchema = new mongoose.Schema({
 // 🔥 Optional (but good): fast queries
 expenseSchema.index({ homeId: 1, createdAt: -1 });
 expenseSchema.index({ homeId: 1, paidBy: 1, createdAt: -1 });
+expenseSchema.index({ homeId: 1, category: 1, createdAt: -1 });
+expenseSchema.index({ homeId: 1, splitEqually: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Expense', expenseSchema);

@@ -25,16 +25,41 @@ router.get('/:homeId', auth, async (req, res) => {
       ]),
       Expense.aggregate([
         { $match: { homeId: Expense.schema.path('homeId').cast(homeId) } },
-        { $group: { _id: null, totalExpense: { $sum: '$amount' } } }
+        {
+          $group: {
+            _id: null,
+            totalExpense: { $sum: '$amount' },
+            mealBasedExpense: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$splitEqually', true] },
+                  0,
+                  '$amount'
+                ]
+              }
+            },
+            sharedExpense: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$splitEqually', true] },
+                  '$amount',
+                  0
+                ]
+              }
+            },
+          }
+        }
       ])
     ]);
 
     const totalExpense = expenseTotals[0]?.totalExpense || 0;
+    const mealBasedExpense = expenseTotals[0]?.mealBasedExpense || 0;
+    const sharedExpense = expenseTotals[0]?.sharedExpense || 0;
     const totalMeals   = mealTotals[0]?.totalMeals || 0;
     const totalEggsConsumed = mealTotals[0]?.totalEggsConsumed || 0;
-    const perMeal      = totalMeals ? totalExpense / totalMeals : 0;
+    const perMeal      = totalMeals ? mealBasedExpense / totalMeals : 0;
 
-    res.json({ totalExpense, totalMeals, perMeal, totalEggsConsumed });
+    res.json({ totalExpense, mealBasedExpense, sharedExpense, totalMeals, perMeal, totalEggsConsumed });
   } catch (err) {
     res.status(err.status || 500).json({ message: err.message || 'Failed to generate report' });
   }

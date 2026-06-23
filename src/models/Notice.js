@@ -15,9 +15,28 @@ const noticeSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['general', 'emergency'],
+    enum: ['general', 'emergency', 'waterSupply'],
     required: true,
     default: 'general',
+  },
+  bottlePrice: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  bottleQty: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  waterTotal: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  expenseId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Expense',
   },
   postedBy: {
     type: mongoose.Schema.Types.ObjectId,

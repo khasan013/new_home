@@ -11,6 +11,36 @@ const router = express.Router();
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 25, keyPrefix: 'auth' });
 const otpLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, keyPrefix: 'otp' });
 const OTP_TTL_MS = 10 * 60 * 1000;
+const TOKEN_TTL = process.env.JWT_EXPIRES_IN || '90d';
+const TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+function signAuthToken(user) {
+  return jwt.sign(
+    { userId: user._id.toString() },
+    process.env.JWT_SECRET,
+    { expiresIn: TOKEN_TTL }
+  );
+}
+
+function authPayload(user, message) {
+  const payload = {
+    token: signAuthToken(user),
+    expiresIn: TOKEN_TTL,
+    expiresAt: new Date(Date.now() + TOKEN_TTL_MS).toISOString(),
+    user: publicUser(user)
+  };
+  if (message) payload.message = message;
+  return payload;
+}
+
+function publicUser(user) {
+  return {
+    userId: user._id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName
+  };
+}
 
 // ── Helper: generate 6-digit OTP ──────────────────────────
 // makeOTP is imported from utils/otp so OTP generation uses crypto.randomInt.
@@ -116,22 +146,7 @@ router.post('/verify-otp', otpLimiter, async (req, res) => {
 
       await PendingRegistration.deleteOne({ _id: pending._id });
 
-      const token = jwt.sign(
-        { userId: user._id },
-        process.env.JWT_SECRET,
-        { expiresIn: '90d' }
-      );
-
-      return res.json({
-        message: 'Email verified. Account created.',
-        token,
-        user: {
-          userId: user._id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName
-        }
-      });
+      return res.json(authPayload(user, 'Email verified. Account created.'));
     }
 
     const user = existingUser;
@@ -156,22 +171,7 @@ router.post('/verify-otp', otpLimiter, async (req, res) => {
 
     await user.save();
 
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: '90d' }
-    );
-
-    return res.json({
-      message: 'Email verified',
-      token,
-      user: {
-        userId: user._id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName
-      }
-    });
+    return res.json(authPayload(user, 'Email verified'));
 
   } catch (err) {
     console.error('Verify OTP failed:', {
@@ -265,21 +265,7 @@ router.post('/login', authLimiter, async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ message: 'Incorrect password' });
 
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: '90d' }
-    );
-
-    res.json({
-      token,
-      user: {
-        userId: user._id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName
-      }
-    });
+    res.json(authPayload(user));
 
   } catch (err) {
     console.error('Login failed:', {
@@ -287,6 +273,25 @@ router.post('/login', authLimiter, async (req, res) => {
       stack: err?.stack || err,
     });
     res.status(500).json({ message: 'Login failed', error: err.message });
+  }
+});
+
+// =========================================================
+// CURRENT USER
+// =========================================================
+router.get('/me', require('../middleware/auth'), async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId)
+      .select('email firstName lastName isVerified')
+      .lean();
+
+    if (!user || !user.isVerified) {
+      return res.status(401).json({ message: 'Invalid or expired token' });
+    }
+
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to load user', error: err.message });
   }
 });
 

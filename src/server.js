@@ -245,19 +245,21 @@ async function startServer() {
   try {
     await connectDB();
 
-    try {
-      await verifyEmailProvider();
-    } catch (emailError) {
-      console.error('❌ Email provider startup verification failed:', {
-        message: emailError?.message || emailError,
-        stack: emailError?.stack || emailError,
-        code: emailError?.code,
-        command: emailError?.command,
-      });
-    }
-
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
+    });
+
+    setImmediate(async () => {
+      try {
+        await verifyEmailProvider();
+      } catch (emailError) {
+        console.error('❌ Email provider startup verification failed:', {
+          message: emailError?.message || emailError,
+          stack: emailError?.stack || emailError,
+          code: emailError?.code,
+          command: emailError?.command,
+        });
+      }
     });
 
   } catch (err) {
