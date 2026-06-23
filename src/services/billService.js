@@ -102,7 +102,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
   const consumedCost = consumedEgg * perEgg;
   const remainingEggCost = Math.max(totalEggPrice - consumedCost, 0);
   const mealBasedBill = remainingEggCost + otherCost;
-  const totalBill = mealBasedBill + sharedCost;
+  const totalBill = mealBasedBill + consumedCost + sharedCost;
   const perMeal = mealBasedBill / totalMeals;
 
   const memberMap = {};

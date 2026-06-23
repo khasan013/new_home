@@ -210,7 +210,8 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const calculatedMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
     const totalMeals = Number(req.body.totalMeals) || calculatedMeals;
     const equalSplitCost = shared + water;
-    const totalBill = Number(req.body.totalBill) || (remainingEggCost + other + equalSplitCost);
+    const mealBasedBill = remainingEggCost + other;
+    const totalBill = mealBasedBill + consumedCost + equalSplitCost;
 
     if (totalMeals <= 0) {
       return res.status(400).json({ message: 'No meals found for this bill' });
@@ -224,7 +225,6 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       console.warn('Meal mismatch:', calculatedMeals, totalMeals);
     }
 
-    const mealBasedBill = Math.max(totalBill - equalSplitCost, 0);
     const perMeal = mealBasedBill / totalMeals;
     const memberMap = {};
 
