@@ -14,7 +14,7 @@ This backend is still a modular monolith. Keep it that way until traffic or team
 - `SMTP_PORT`, defaults to `587`
 - `SMTP_SECURE`, set `true` only for port `465`
 - `CORS_ORIGINS` as a comma-separated list
-- `CRON_SECRET` for `/api/cron/reset-month`
+- `CRON_SECRET` for the protected monthly cron routes. Set the same value in Vercel.
 - `PORT`, defaults to `8080`
 
 ## Email delivery
@@ -30,6 +30,16 @@ Useful tuning knobs:
 - `EMAIL_RETRY_ATTEMPTS`, defaults to `3`
 - `EMAIL_RETRY_BASE_DELAY_MS`, defaults to `750`
 - `BILL_EMAIL_CONCURRENCY`, defaults to `2`
+- `BILL_HOME_CONCURRENCY`, defaults to `2`; raise cautiously for larger homes.
+
+## Monthly billing schedule
+
+All schedule times use `Asia/Dhaka`:
+
+- On the first day of each month at **12:01 AM**, MealMate generates and emails every home member's previous-month statement. Homes with zero meals still get a statement.
+- At **12:30 AM**, the previous month's meals, expenses, and penalties are cleared for the next month. Generated bill records are retained.
+
+The Vercel schedules are expressed in UTC and the API executes them only when it is the first day in Dhaka. The unique `(homeId, month)` bill index prevents duplicate email batches when more than one scheduler is active.
 - `SMTP_CONNECTION_TIMEOUT_MS`, defaults to `10000`
 - `SMTP_GREETING_TIMEOUT_MS`, defaults to `10000`
 - `SMTP_SOCKET_TIMEOUT_MS`, defaults to `20000`

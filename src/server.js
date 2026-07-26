@@ -14,6 +14,7 @@ const morgan = require('morgan');
 const net = require('net');
 const { verifyEmailProvider } = require('./utils/sendEmail');
 require('./jobs/monthlyBill');
+require('./jobs/monthlyReset');
 
 const app = express();
 

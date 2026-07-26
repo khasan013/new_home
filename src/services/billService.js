@@ -4,6 +4,8 @@ const Home = require('../models/Home');
 const Meal = require('../models/Meal');
 const { deliverBillEmails } = require('./billDelivery');
 
+const BILL_HOME_CONCURRENCY = Math.max(Number(process.env.BILL_HOME_CONCURRENCY || 2), 1);
+
 function getPreviousMonthPeriod(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Dhaka',
@@ -43,10 +45,8 @@ async function pruneBillHistory(homeId) {
 async function calculateAndSendMonthlyBill(home, period, options = {}) {
   const homeId = home._id;
   const { periodStart, periodEnd, month } = period;
-  const force = options.force === true;
-
   const existing = await Bill.findOne({ homeId, month }).lean();
-  if (existing && !force) {
+  if (existing) {
     await pruneBillHistory(homeId);
     return { skipped: true, reason: 'Bill already exists', bill: existing };
   }
@@ -93,17 +93,13 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
 
   const totalMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
-  if (totalMeals <= 0) {
-    return { skipped: true, reason: 'No meals found for this bill' };
-  }
-
   const consumedEgg = meals.reduce((sum, meal) => sum + (Number(meal.eggsCount) || 0), 0);
   const perEgg = totalEggCount > 0 ? totalEggPrice / totalEggCount : 0;
   const consumedCost = consumedEgg * perEgg;
   const remainingEggCost = Math.max(totalEggPrice - consumedCost, 0);
   const mealBasedBill = remainingEggCost + otherCost;
   const totalBill = mealBasedBill + consumedCost + sharedCost;
-  const perMeal = mealBasedBill / totalMeals;
+  const perMeal = totalMeals > 0 ? mealBasedBill / totalMeals : 0;
 
   const memberMap = {};
   for (const { user } of fullHome.members) {
@@ -158,6 +154,42 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     perMemberShare,
   };
 
+  const adminMember = fullHome.members.find(member => member.role === 'admin' && member.user)
+    || fullHome.members.find(member => member.user);
+
+  let bill;
+  try {
+    // Claim this home/month before email work starts. The unique index makes the
+    // operation safe even when Vercel and a persistent worker fire together.
+    bill = await Bill.create({
+      homeId,
+      month,
+      periodStart,
+      periodEnd,
+      totalEggPrice,
+      totalEggCount,
+      consumedEgg,
+      otherCost,
+      sharedCost,
+      waterCost,
+      totalMeals,
+      totalBill,
+      perEgg,
+      perMeal,
+      perMemberShare,
+      deliveryStatus: 'sending',
+      sentBy: adminMember?.user?._id || adminMember?.user,
+      breakdown,
+      costSummary,
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      const claimedBill = await Bill.findOne({ homeId, month }).lean();
+      return { skipped: true, reason: 'Bill is already being processed', bill: claimedBill };
+    }
+    throw error;
+  }
+
   const { sent, failed } = await deliverBillEmails({
     recipients: breakdown,
     homeName: fullHome.name,
@@ -174,36 +206,15 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       ? 'failed'
       : 'partial';
 
-  const adminMember = fullHome.members.find(member => member.role === 'admin' && member.user)
-    || fullHome.members.find(member => member.user);
-
-  const bill = await Bill.findOneAndUpdate(
-    { homeId, month },
+  bill = await Bill.findByIdAndUpdate(
+    bill._id,
     {
-      homeId,
-      month,
-      periodStart,
-      periodEnd,
-      totalEggPrice,
-      totalEggCount,
-      consumedEgg,
-      otherCost,
-      sharedCost,
-      waterCost,
-      totalMeals,
-      totalBill,
-      perEgg,
-      perMeal,
-      perMemberShare,
       sentCount: sent,
       failedCount: failed,
       deliveryStatus,
       deliveryCompletedAt: new Date(),
-      sentBy: adminMember?.user?._id || adminMember?.user,
-      breakdown,
-      costSummary,
     },
-    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    { new: true, runValidators: true }
   ).lean();
 
   await pruneBillHistory(homeId);
@@ -221,22 +232,32 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
 
 async function processMonthlyBills(options = {}) {
   const period = options.period || getPreviousMonthPeriod(options.now);
-  const homes = await Home.find().lean();
-  const results = [];
+  const homes = await Home.find().select('_id name').lean();
 
-  for (const home of homes) {
+  const processHome = async (home) => {
     try {
       const result = await calculateAndSendMonthlyBill(home, period, options);
-      results.push({ homeId: home._id, homeName: home.name, ...result });
+      return { homeId: home._id, homeName: home.name, ...result };
     } catch (err) {
-      results.push({
+      console.error(`Monthly bill failed for home "${home.name}":`, err);
+      return {
         homeId: home._id,
         homeName: home.name,
         error: err.message,
-      });
-      console.error(`Monthly bill failed for home "${home.name}":`, err);
+      };
     }
-  }
+  };
+
+  let nextIndex = 0;
+  const results = new Array(homes.length);
+  const workerCount = Math.min(BILL_HOME_CONCURRENCY, homes.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < homes.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await processHome(homes[index]);
+    }
+  }));
 
   return { period, results };
 }

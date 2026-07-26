@@ -125,5 +125,8 @@ const billSchema = new mongoose.Schema({
 
 billSchema.index({ homeId: 1, createdAt: -1 });
 billSchema.index({ homeId: 1, periodStart: -1 });
+// One statement per home and billing period also prevents duplicate cron workers
+// from sending the same monthly bill twice.
+billSchema.index({ homeId: 1, month: 1 }, { unique: true });
 
 module.exports = mongoose.model('Bill', billSchema);

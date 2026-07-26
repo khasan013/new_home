@@ -1,14 +1,14 @@
 const express = require('express');
-const Expense = require('../models/Expense');
-const Meal = require('../models/Meal');
-const Penalty = require('../models/Penalty');
 const { processMonthlyBills } = require('../services/billService');
+const { resetMonthlyWorkingData } = require('../services/monthlyReset');
 
 const router = express.Router();
 
 const requireCronSecret = (req, res, next) => {
   const configuredSecret = process.env.CRON_SECRET;
-  const providedSecret = req.headers['x-cron-secret'] || req.query.secret;
+  const authorization = String(req.headers.authorization || '');
+  const bearerToken = authorization.replace(/^Bearer\s+/i, '');
+  const providedSecret = req.headers['x-cron-secret'] || req.query.secret || bearerToken;
 
   if (!configuredSecret) {
     return res.status(503).json({ message: 'CRON_SECRET is not configured' });
@@ -21,8 +21,16 @@ const requireCronSecret = (req, res, next) => {
   return next();
 };
 
+const isFirstDayInDhaka = () => new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Dhaka',
+  day: 'numeric',
+}).format(new Date()) === '1';
+
 router.get('/monthly-bills', requireCronSecret, async (req, res) => {
   try {
+    if (!isFirstDayInDhaka()) {
+      return res.json({ message: 'Skipped: it is not the first day of the month in Asia/Dhaka' });
+    }
     const result = await processMonthlyBills({ force: req.query.force === 'true' });
     res.json({
       message: `Monthly bill processing done for ${result.period.month}`,
@@ -39,17 +47,16 @@ router.get('/monthly-bills', requireCronSecret, async (req, res) => {
 
 router.get('/reset-month', requireCronSecret, async (req, res) => {
   try {
+    if (!isFirstDayInDhaka()) {
+      return res.json({ message: 'Skipped: it is not the first day of the month in Asia/Dhaka' });
+    }
     console.log('Running monthly reset...');
 
-    const billResult = await processMonthlyBills();
-
-    await Meal.deleteMany({});
-    await Expense.deleteMany({});
-    await Penalty.deleteMany({});
+    const resetResult = await resetMonthlyWorkingData();
 
     res.json({
-      message: 'Monthly reset done (Bills + Meals + Expenses + Penalties)',
-      bills: billResult,
+      message: 'Monthly reset done (Meals + Expenses + Penalties)',
+      reset: resetResult,
     });
   } catch (err) {
     console.error('Monthly reset failed:', err);
