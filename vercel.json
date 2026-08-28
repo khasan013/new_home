@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/monthly-bills",
-      "schedule": "1 18 28-31 * *"
+      "schedule": "30 17 28-31 * *"
     },
     {
       "path": "/api/cron/reset-month",

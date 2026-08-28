@@ -21,15 +21,26 @@ const requireCronSecret = (req, res, next) => {
   return next();
 };
 
-const isFirstDayInDhaka = () => new Intl.DateTimeFormat('en-US', {
+const getDhakaDay = () => new Intl.DateTimeFormat('en-US', {
   timeZone: 'Asia/Dhaka',
   day: 'numeric',
-}).format(new Date()) === '1';
+}).format(new Date());
+
+const isFirstDayInDhaka = () => getDhakaDay() === '1';
+
+const isLastDayInDhaka = () => {
+  const now = new Date();
+  const tomorrowInDhaka = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+  return getDhakaDay() !== new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dhaka',
+    day: 'numeric',
+  }).format(tomorrowInDhaka);
+};
 
 router.get('/monthly-bills', requireCronSecret, async (req, res) => {
   try {
-    if (!isFirstDayInDhaka()) {
-      return res.json({ message: 'Skipped: it is not the first day of the month in Asia/Dhaka' });
+    if (!isLastDayInDhaka()) {
+      return res.json({ message: 'Skipped: it is not the last day of the month in Asia/Dhaka' });
     }
     const result = await processMonthlyBills({ force: req.query.force === 'true' });
     res.json({

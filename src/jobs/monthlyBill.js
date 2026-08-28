@@ -1,7 +1,16 @@
 const cron = require('node-cron');
 const { processMonthlyBills } = require('../services/billService');
 
-cron.schedule('1 0 1 * *', async () => {
+cron.schedule('30 23 28-31 * *', async () => {
+  const now = new Date();
+  const dayFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dhaka',
+    day: 'numeric',
+  });
+  const today = dayFormatter.format(now);
+  const tomorrow = dayFormatter.format(new Date(now.getTime() + (24 * 60 * 60 * 1000)));
+  if (today === tomorrow) return;
+
   console.log('Monthly bill cron started...');
 
   try {
@@ -20,5 +29,4 @@ cron.schedule('1 0 1 * *', async () => {
   timezone: 'Asia/Dhaka',
 });
 
-console.log('Monthly bill cron registered (1st day of every month at 12:01 AM Asia/Dhaka)');
-
+console.log('Monthly bill cron registered (last day of every month at 11:30 PM Asia/Dhaka)');

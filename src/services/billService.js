@@ -6,7 +6,9 @@ const { deliverBillEmails } = require('./billDelivery');
 
 const BILL_HOME_CONCURRENCY = Math.max(Number(process.env.BILL_HOME_CONCURRENCY || 2), 1);
 
-function getPreviousMonthPeriod(now = new Date()) {
+// Monthly bills are generated before midnight on the final day of the month,
+// so this is the current Dhaka calendar month (not the previous one).
+function getCurrentMonthPeriod(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Dhaka',
     year: 'numeric',
@@ -14,10 +16,12 @@ function getPreviousMonthPeriod(now = new Date()) {
   }).formatToParts(now);
   const year = Number(parts.find(part => part.type === 'year').value);
   const currentMonth = Number(parts.find(part => part.type === 'month').value);
-  const previousMonthDate = new Date(Date.UTC(year, currentMonth - 2, 1));
-  const periodStart = new Date(Date.UTC(year, currentMonth - 2, 1, -6));
-  const periodEnd = new Date(Date.UTC(year, currentMonth - 1, 1, -6));
-  const month = previousMonthDate.toLocaleDateString('en-US', {
+  // Dhaka is UTC+06:00. These UTC instants are midnight at the beginning of
+  // this month and the beginning of the next month in Asia/Dhaka.
+  const currentMonthDate = new Date(Date.UTC(year, currentMonth - 1, 1));
+  const periodStart = new Date(Date.UTC(year, currentMonth - 1, 1, -6));
+  const periodEnd = new Date(Date.UTC(year, currentMonth, 1, -6));
+  const month = currentMonthDate.toLocaleDateString('en-US', {
     month: 'long',
     year: 'numeric',
     timeZone: 'UTC',
@@ -231,7 +235,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
 }
 
 async function processMonthlyBills(options = {}) {
-  const period = options.period || getPreviousMonthPeriod(options.now);
+  const period = options.period || getCurrentMonthPeriod(options.now);
   const homes = await Home.find().select('_id name').lean();
 
   const processHome = async (home) => {
@@ -264,7 +268,7 @@ async function processMonthlyBills(options = {}) {
 
 module.exports = {
   calculateAndSendMonthlyBill,
-  getPreviousMonthPeriod,
+  getCurrentMonthPeriod,
   processMonthlyBills,
   pruneBillHistory,
 };

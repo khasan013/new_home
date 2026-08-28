@@ -36,10 +36,10 @@ Useful tuning knobs:
 
 All schedule times use `Asia/Dhaka`:
 
-- On the first day of each month at **12:01 AM**, MealMate generates and emails every home member's previous-month statement. Homes with zero meals still get a statement.
-- At **12:30 AM**, the previous month's meals, expenses, and penalties are cleared for the next month. Generated bill records are retained.
+- On the last day of each month at **11:30 PM**, MealMate generates and emails every home member's statement for that month, before the reset begins. Homes with zero meals still get a statement.
+- On the first day of the next month at **12:30 AM**, the prior month's meals, expenses, and penalties are cleared for the new month. Generated bill records are retained as bill history.
 
-The Vercel schedules are expressed in UTC and the API executes them only when it is the first day in Dhaka. The unique `(homeId, month)` bill index prevents duplicate email batches when more than one scheduler is active.
+The Vercel schedules are expressed in UTC and the API verifies that billing runs on Dhaka's last calendar day and reset runs on its first calendar day. The unique `(homeId, month)` bill index prevents duplicate email batches when more than one scheduler is active.
 - `SMTP_CONNECTION_TIMEOUT_MS`, defaults to `10000`
 - `SMTP_GREETING_TIMEOUT_MS`, defaults to `10000`
 - `SMTP_SOCKET_TIMEOUT_MS`, defaults to `20000`
