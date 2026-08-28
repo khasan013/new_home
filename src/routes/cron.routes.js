@@ -1,6 +1,7 @@
 const express = require('express');
 const { processMonthlyBills } = require('../services/billService');
 const { resetMonthlyWorkingData } = require('../services/monthlyReset');
+const { isFirstDayInDhaka, isLastDayInDhaka } = require('../utils/dhakaCalendar');
 
 const router = express.Router();
 
@@ -19,22 +20,6 @@ const requireCronSecret = (req, res, next) => {
   }
 
   return next();
-};
-
-const getDhakaDay = () => new Intl.DateTimeFormat('en-US', {
-  timeZone: 'Asia/Dhaka',
-  day: 'numeric',
-}).format(new Date());
-
-const isFirstDayInDhaka = () => getDhakaDay() === '1';
-
-const isLastDayInDhaka = () => {
-  const now = new Date();
-  const tomorrowInDhaka = new Date(now.getTime() + (24 * 60 * 60 * 1000));
-  return getDhakaDay() !== new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Dhaka',
-    day: 'numeric',
-  }).format(tomorrowInDhaka);
 };
 
 router.get('/monthly-bills', requireCronSecret, async (req, res) => {
@@ -66,7 +51,7 @@ router.get('/reset-month', requireCronSecret, async (req, res) => {
     const resetResult = await resetMonthlyWorkingData();
 
     res.json({
-      message: 'Monthly reset done (Meals + Expenses + Penalties)',
+      message: 'Monthly reset done (Meals + Expenses + Penalties + Bills)',
       reset: resetResult,
     });
   } catch (err) {

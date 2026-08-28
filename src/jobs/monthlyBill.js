@@ -1,15 +1,9 @@
 const cron = require('node-cron');
 const { processMonthlyBills } = require('../services/billService');
+const { DHAKA_TIME_ZONE, isLastDayInDhaka } = require('../utils/dhakaCalendar');
 
 cron.schedule('30 23 28-31 * *', async () => {
-  const now = new Date();
-  const dayFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Dhaka',
-    day: 'numeric',
-  });
-  const today = dayFormatter.format(now);
-  const tomorrow = dayFormatter.format(new Date(now.getTime() + (24 * 60 * 60 * 1000)));
-  if (today === tomorrow) return;
+  if (!isLastDayInDhaka()) return;
 
   console.log('Monthly bill cron started...');
 
@@ -26,7 +20,7 @@ cron.schedule('30 23 28-31 * *', async () => {
     console.error('Monthly bill cron failed:', err);
   }
 }, {
-  timezone: 'Asia/Dhaka',
+  timezone: DHAKA_TIME_ZONE,
 });
 
 console.log('Monthly bill cron registered (last day of every month at 11:30 PM Asia/Dhaka)');
