@@ -196,6 +196,9 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const meals = await Meal.find({
       homeId: req.params.homeId,
       isPenalty: false,
+      // A bill must only use meals in its own billing period. Without this
+      // filter, a later bill accidentally includes meals from other months.
+      date: { $gte: periodStart, $lt: periodEnd },
     })
       .select('userId mealCount eggsCount')
       .populate('userId', 'firstName lastName email')
@@ -208,7 +211,10 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     });
 
     const calculatedMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
-    const totalMeals = Number(req.body.totalMeals) || calculatedMeals;
+    const requestedTotalMeals = req.body.totalMeals === undefined || req.body.totalMeals === null || req.body.totalMeals === ''
+      ? null
+      : Number(req.body.totalMeals);
+    const totalMeals = calculatedMeals;
     const equalSplitCost = shared + water;
     const mealBasedBill = remainingEggCost + other;
     const totalBill = mealBasedBill + consumedCost + equalSplitCost;
@@ -221,8 +227,10 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       return res.status(400).json({ message: 'Bill values must be valid positive numbers' });
     }
 
-    if (Math.abs(calculatedMeals - totalMeals) > 0.001) {
-      console.warn('Meal mismatch:', calculatedMeals, totalMeals);
+    if (requestedTotalMeals !== null && (!Number.isFinite(requestedTotalMeals) || Math.abs(requestedTotalMeals - calculatedMeals) > 0.001)) {
+      return res.status(400).json({
+        message: `Meal total changed. Expected ${calculatedMeals}, received ${req.body.totalMeals}. Refresh the bill and send again.`,
+      });
     }
 
     const perMeal = mealBasedBill / totalMeals;
@@ -373,41 +381,40 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       });
     };
 
-    setImmediate(() => {
-      processBillDelivery().catch(async (deliveryError) => {
-        console.error('BILL DELIVERY ERROR:', {
-          billId: bill._id,
-          message: deliveryError?.message || deliveryError,
-          stack: deliveryError?.stack || deliveryError,
-        });
-
-        await Bill.findByIdAndUpdate(bill._id, {
-          failedCount: recipients.length,
-          deliveryStatus: 'failed',
-          deliveryCompletedAt: new Date(),
-        }).catch(updateError => {
-          console.error('BILL DELIVERY STATUS UPDATE ERROR:', {
-            billId: bill._id,
-            message: updateError?.message || updateError,
-            stack: updateError?.stack || updateError,
-          });
-        });
+    // Do not detach this work from the request. Serverless runtimes can terminate
+    // immediately after a response is sent, which silently drops queued emails.
+    try {
+      await processBillDelivery();
+    } catch (deliveryError) {
+      console.error('BILL DELIVERY ERROR:', {
+        billId: bill._id,
+        message: deliveryError?.message || deliveryError,
+        stack: deliveryError?.stack || deliveryError,
       });
-    });
 
-    const responseMessage = `Bill generated. Email delivery is running for ${recipients.length} member(s).`;
+      await Bill.findByIdAndUpdate(bill._id, {
+        failedCount: recipients.length,
+        deliveryStatus: 'failed',
+        deliveryCompletedAt: new Date(),
+      });
+      throw deliveryError;
+    }
+
+    const completedBill = await Bill.findById(bill._id).lean() || billForResponse;
+    const responseMessage = `Bill generated and delivered to ${completedBill.sentCount} member(s).`;
 
     const responseBody = {
       message: responseMessage,
-      bill: billForResponse,
+      bill: completedBill,
       totalBill,
       perMeal,
       breakdown,
-      queued: recipients.length,
-      deliveryStatus: billForResponse.deliveryStatus,
+      sent: completedBill.sentCount,
+      failed: completedBill.failedCount,
+      deliveryStatus: completedBill.deliveryStatus,
     };
 
-    return res.status(202).json(responseBody);
+    return res.status(201).json(responseBody);
   } catch (err) {
     console.error('BILL SEND ERROR:', err);
     res.status(err.status || 500).json({ message: err.message });

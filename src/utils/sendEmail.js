@@ -1,6 +1,7 @@
 console.log('=== SEND EMAIL FILE LOADED ===');
 console.log('=== VERSION 1 ===');
 const RESEND_API_URL = 'https://api.resend.com/emails';
+const nodemailer = require('nodemailer');
 const EMAIL_RETRY_ATTEMPTS = Math.max(Number(process.env.EMAIL_RETRY_ATTEMPTS || 3), 1);
 const EMAIL_RETRY_BASE_DELAY_MS = Math.max(Number(process.env.EMAIL_RETRY_BASE_DELAY_MS || 750), 0);
 const RESEND_TIMEOUT_MS = Math.max(Number(process.env.RESEND_TIMEOUT_MS || 15000), 1000);
@@ -19,7 +20,13 @@ const senderEmail = configuredSenderEmail && configuredSenderEmail !== 'noreply@
 const sender = `"MealMate" <${senderEmail}>`;
 const hasResendApiKey = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 'kkkk');
 const emailProvider = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
-const activeEmailProvider = 'resend';
+const activeEmailProvider = emailProvider === 'auto'
+  ? (hasResendApiKey ? 'resend' : 'smtp')
+  : emailProvider;
+const smtpPort = Number(process.env.SMTP_PORT || 587);
+const smtpSecure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true';
+const smtpHost = String(process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+let smtpTransport;
 
 const isValidEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
@@ -93,21 +100,29 @@ const withEmailRetries = async (label, operation) => {
 
 const verifyEmailProvider = async () => {
   logProviderConfig('startup');
-  if (!hasResendApiKey) {
-    throw new Error('RESEND_API_KEY must be configured');
-  }
-
-  if (!configuredSenderEmail) {
-    throw new Error('EMAIL_FROM must be configured');
-  }
-
   if (!isValidEmail(senderEmail)) {
     throw new Error(`Invalid sender email configured: ${senderEmail || '(empty)'}`);
   }
 
-  console.log('[email:startup] Resend HTTPS provider configured');
+  if (activeEmailProvider === 'resend') {
+    if (!hasResendApiKey) throw new Error('RESEND_API_KEY must be configured');
+    if (!configuredSenderEmail || configuredSenderEmail === 'noreply@yourapp.com') {
+      throw new Error('EMAIL_FROM must be set to a verified sender address when using Resend');
+    }
+    console.log('[email:startup] Resend HTTPS provider configured');
+    return true;
+  }
 
-  return true;
+  if (activeEmailProvider === 'smtp') {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      throw new Error('EMAIL_USER and EMAIL_PASS must be configured for SMTP');
+    }
+    await getSmtpTransport().verify();
+    console.log('[email:startup] SMTP provider verified');
+    return true;
+  }
+
+  throw new Error(`Unsupported EMAIL_PROVIDER: ${activeEmailProvider}`);
 };
 
 const normalizeRecipients = to => Array.isArray(to) ? to : [to];
@@ -187,6 +202,35 @@ const sendWithResend = async (label, mailOptions) => {
   };
 };
 
+const getSmtpTransport = () => {
+  if (!smtpTransport) {
+    smtpTransport = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+      family: String(process.env.SMTP_FORCE_IPV4 || '').toLowerCase() === 'true' ? 4 : undefined,
+      connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
+      greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
+      socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
+    });
+  }
+  return smtpTransport;
+};
+
+const sendWithSmtp = async (label, mailOptions) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error('EMAIL_USER and EMAIL_PASS must be configured for SMTP');
+  }
+
+  console.log(`[email:${label}] SMTP send request started`);
+  const info = await getSmtpTransport().sendMail({ ...mailOptions, from: sender });
+  return { ...info, provider: 'smtp' };
+};
+
 const sendMailWithLogging = async (label, mailOptions) => {
   console.log(`[email:${label}] recipient email:`, mailOptions.to);
   console.log(`[email:${label}] email subject:`, mailOptions.subject);
@@ -202,10 +246,13 @@ const sendMailWithLogging = async (label, mailOptions) => {
     throw new Error(`Invalid recipient email: ${mailOptions.to || '(empty)'}`);
   }
 
-  return withEmailRetries(
-  label,
-  () => sendWithResend(label, mailOptions)
-);
+  if (activeEmailProvider === 'resend') {
+    return withEmailRetries(label, () => sendWithResend(label, mailOptions));
+  }
+  if (activeEmailProvider === 'smtp') {
+    return withEmailRetries(label, () => sendWithSmtp(label, mailOptions));
+  }
+  throw new Error(`Unsupported EMAIL_PROVIDER: ${activeEmailProvider}`);
 };
 
 const sendOTP = async (to, otp, options = {}) => {
@@ -262,6 +309,28 @@ const sendReportEmail = async ({ to, firstName, month, pdfBuffer }) => {
       content: pdfBuffer,
       contentType: 'application/pdf',
     }],
+  });
+};
+
+const sendBillCorrectionEmail = async ({ to, firstName, month, incorrectTotal, correctTotal }) => {
+  const name = escapeHtml(firstName || 'there');
+  return sendMailWithLogging('bill-correction', {
+    to,
+    subject: `Correction to your MealMate bill for ${month}`,
+    text: `Hi ${firstName || 'there'}, we are sorry. The earlier MealMate bill for ${month} used an incorrect meal total. Please disregard that statement. The correct home total is ${money(correctTotal)} (the earlier statement showed ${money(incorrectTotal)}). A corrected bill will arrive shortly.`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:32px;border:1px solid #e2e8f0;border-radius:16px;color:#0f172a;">
+        <h2 style="margin:0 0 16px;color:#312e81;">Bill correction</h2>
+        <p>Hi <strong>${name}</strong>,</p>
+        <p style="line-height:1.7;color:#475569;">We are sorry—the earlier MealMate bill for <strong>${escapeHtml(month)}</strong> used an incorrect meal total. Please disregard that statement.</p>
+        <div style="margin:20px 0;padding:16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;">
+          <div style="color:#64748b;font-size:13px;">Earlier home total</div>
+          <div style="font-size:18px;text-decoration:line-through;color:#64748b;">${money(incorrectTotal)}</div>
+          <div style="margin-top:12px;color:#312e81;font-size:13px;font-weight:700;">Correct home total</div>
+          <div style="font-size:24px;font-weight:800;color:#312e81;">${money(correctTotal)}</div>
+        </div>
+        <p style="line-height:1.7;color:#475569;">Your corrected PDF statement will arrive in a separate email shortly.</p>
+      </div>`,
   });
 };
 
@@ -347,4 +416,4 @@ const sendBillEmail = async ({
   });
 };
 
-module.exports = { sendOTP, sendReportEmail, sendBillEmail, verifyEmailProvider };
+module.exports = { sendOTP, sendReportEmail, sendBillEmail, sendBillCorrectionEmail, verifyEmailProvider };
