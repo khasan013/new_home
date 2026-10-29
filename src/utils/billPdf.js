@@ -82,7 +82,7 @@ function generateBillPDF(data) {
     const gap = 10;
     const cardWidth = (contentWidth - gap * 2) / 3;
     [
-      ['Home total', money(totalBill)],
+      ['Meal bill total', money(totalBill)],
       ['Total meals', String(Number(totalMeals || 0))],
       ['Cost per meal', money(perMeal)],
     ].forEach(([label, value], index) => {
@@ -95,6 +95,14 @@ function generateBillPDF(data) {
     });
 
     doc.y = summaryY + 84;
+    doc.roundedRect(46, doc.y, contentWidth, 48, 8).fillAndStroke('#EFF6FF', '#93C5FD');
+    doc.fillColor('#1E3A8A').font('Helvetica-Bold').fontSize(11)
+      .text('WATER SUPPLY BILL (SEPARATE)', 58, doc.y + 8, { width: 310 });
+    doc.fillColor('#1E3A8A').font('Helvetica-Bold').fontSize(13)
+      .text(money(waterShare), 370, doc.y + 7, { width: 160, align: 'right' });
+    doc.fillColor(slate).font('Helvetica').fontSize(8)
+      .text(`Home water cost: ${money(costSummary.water)}`, 58, doc.y + 27, { width: contentWidth - 24 });
+    doc.y += 64;
     doc.fillColor(navy).font('Helvetica-Bold').fontSize(14).text('Cost details');
     const details = [
       ['Egg purchases', money(costSummary.eggPrice)],
@@ -102,8 +110,6 @@ function generateBillPDF(data) {
       ['Consumed egg cost', money(costSummary.consumedCost)],
       ['Remaining egg cost', money(costSummary.remainingEggCost)],
       ['Other household cost', money(costSummary.other)],
-      ['Water supply (home total)', money(costSummary.water)],
-      ['Water supply (your share)', money(waterShare)],
     ];
     const detailY = doc.y + 10;
     details.forEach(([label, value], index) => {

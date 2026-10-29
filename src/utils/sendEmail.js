@@ -369,7 +369,7 @@ const sendBillEmail = async ({
     from: sender,
     to,
     subject: `Your MealMate bill for ${month}: ${money(share)}`,
-    text: `Hi ${firstName}, your MealMate bill for ${month} is ${money(share)}. Your water supply share is ${money(waterShare)}. Your detailed PDF statement is attached.`,
+    text: `Hi ${firstName}, your MealMate bill for ${month} is ${money(share)}. Water supply is billed separately below: ${money(waterShare)}.`,
     html: `
       <div style="margin:0;background:#f1f5f9;padding:36px 12px;font-family:Arial,sans-serif;color:#0f172a;">
         <div style="max-width:620px;margin:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,.10);">
@@ -394,9 +394,9 @@ const sendBillEmail = async ({
               <tr><td style="padding:7px 0;color:#64748b;">Consumed egg cost</td><td style="text-align:right;font-weight:600;">${money(consumedCost)}</td></tr>
               <tr><td style="padding:7px 0;color:#64748b;">Remaining egg cost</td><td style="text-align:right;font-weight:600;">${money(remainingEggCost)}</td></tr>
               <tr><td style="padding:7px 0;color:#64748b;">Other cost</td><td style="text-align:right;font-weight:600;">${money(other)}</td></tr>
-              <tr><td style="padding:7px 0;color:#64748b;">Water supply (home total)</td><td style="text-align:right;font-weight:600;">${money(water)}</td></tr>
-              <tr><td style="padding:7px 0;color:#64748b;">Your water supply share</td><td style="text-align:right;font-weight:600;">${money(waterShare)}</td></tr>
-              <tr><td style="padding:11px 0;border-top:2px solid #c7d2fe;font-weight:800;">Home total</td><td style="padding:11px 0;border-top:2px solid #c7d2fe;text-align:right;font-weight:800;color:#4f46e5;">${money(totalBill)}</td></tr>
+              <tr><td style="padding:11px 0;border-top:2px solid #c7d2fe;font-weight:800;">Meal bill total</td><td style="padding:11px 0;border-top:2px solid #c7d2fe;text-align:right;font-weight:800;color:#4f46e5;">${money(totalBill)}</td></tr>
+              <tr><td style="padding:12px 0 5px;border-top:2px solid #0f172a;font-weight:800;color:#0f172a;">Water supply bill (separate)</td><td style="padding:12px 0 5px;border-top:2px solid #0f172a;text-align:right;font-weight:800;color:#0f172a;">${money(waterShare)}</td></tr>
+              <tr><td style="padding:0 0 10px;color:#64748b;font-size:12px;">Home water cost: ${money(water)}</td><td></td></tr>
             </table>
 
             <h3 style="font-size:15px;margin:0 0 10px;color:#0f172a;">Member breakdown</h3>

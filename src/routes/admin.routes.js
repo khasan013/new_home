@@ -265,9 +265,8 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       ? null
       : Number(req.body.totalMeals);
     const totalMeals = calculatedMeals;
-    const equalSplitCost = shared + water;
     const mealBasedBill = remainingEggCost + other;
-    const totalBill = mealBasedBill + consumedCost + equalSplitCost;
+    const totalBill = mealBasedBill + consumedCost + shared;
 
     if (totalMeals <= 0) {
       return res.status(400).json({ message: 'No meals found for this bill' });
@@ -330,13 +329,13 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     const waterEligibleCount = Object.keys(memberMap).filter(uid => !excludedWaterUsers.has(uid)).length;
     const sharedPerMember = memberCount > 0 ? shared / memberCount : 0;
     const waterPerMember = waterEligibleCount > 0 ? water / waterEligibleCount : 0;
-    const perMemberShare = sharedPerMember + waterPerMember;
+    const perMemberShare = sharedPerMember;
 
     Object.values(memberMap).forEach(member => {
       const mealCost = perMeal * member.meals;
       const eggCost = member.eggs * perEgg;
       member.waterShare = excludedWaterUsers.has(member.userId) ? 0 : waterPerMember;
-      member.equalShare = sharedPerMember + member.waterShare;
+      member.equalShare = sharedPerMember;
       member.share = mealCost + eggCost + member.equalShare;
     });
 
