@@ -95,6 +95,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
   const sharedCost = expenses
     .filter(expense => expense.splitEqually)
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+  const nonWaterSharedCost = Math.max(sharedCost - waterCost, 0);
 
   const totalMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
   const consumedEgg = meals.reduce((sum, meal) => sum + (Number(meal.eggsCount) || 0), 0);
@@ -117,6 +118,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
       eggs: 0,
       share: 0,
       equalShare: 0,
+      waterShare: 0,
     };
   }
 
@@ -132,6 +134,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
         eggs: 0,
         share: 0,
         equalShare: 0,
+        waterShare: 0,
       };
     }
     memberMap[uid].meals += Number(meal.mealCount) || 0;
@@ -139,11 +142,16 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
   }
 
   const memberCount = Object.keys(memberMap).length;
-  const perMemberShare = memberCount > 0 ? sharedCost / memberCount : 0;
+  const excludedWaterUsers = new Set((fullHome.waterBillExcludedUsers || []).map(id => id.toString()));
+  const waterEligibleCount = Object.keys(memberMap).filter(uid => !excludedWaterUsers.has(uid)).length;
+  const sharedPerMember = memberCount > 0 ? nonWaterSharedCost / memberCount : 0;
+  const waterPerMember = waterEligibleCount > 0 ? waterCost / waterEligibleCount : 0;
+  const perMemberShare = sharedPerMember + waterPerMember;
 
   Object.values(memberMap).forEach(member => {
-    member.equalShare = perMemberShare;
-    member.share = (perMeal * member.meals) + (perEgg * member.eggs) + perMemberShare;
+    member.waterShare = excludedWaterUsers.has(member.userId) ? 0 : waterPerMember;
+    member.equalShare = sharedPerMember + member.waterShare;
+    member.share = (perMeal * member.meals) + (perEgg * member.eggs) + member.equalShare;
   });
 
   const breakdown = Object.values(memberMap);
@@ -153,7 +161,7 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     consumedCost,
     remainingEggCost,
     other: otherCost,
-    shared: sharedCost,
+    shared: nonWaterSharedCost,
     water: waterCost,
     perMemberShare,
   };

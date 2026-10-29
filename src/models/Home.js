@@ -19,6 +19,11 @@ const homeSchema = new mongoose.Schema({
     min: 0,
   },
 
+  waterBillExcludedUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
+
   members: [
     {
       user: {

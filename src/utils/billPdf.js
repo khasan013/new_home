@@ -11,6 +11,7 @@ function generateBillPDF(data) {
       userMeals,
       userEggs = 0,
       share,
+      waterShare = 0,
       totalBill,
       totalMeals,
       perMeal,
@@ -101,6 +102,8 @@ function generateBillPDF(data) {
       ['Consumed egg cost', money(costSummary.consumedCost)],
       ['Remaining egg cost', money(costSummary.remainingEggCost)],
       ['Other household cost', money(costSummary.other)],
+      ['Water supply (home total)', money(costSummary.water)],
+      ['Water supply (your share)', money(waterShare)],
     ];
     const detailY = doc.y + 10;
     details.forEach(([label, value], index) => {

@@ -23,6 +23,10 @@ const billBreakdownSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  waterShare: {
+    type: Number,
+    default: 0,
+  },
 }, { _id: false });
 
 const billSchema = new mongoose.Schema({

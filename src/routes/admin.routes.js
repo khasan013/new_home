@@ -50,6 +50,29 @@ router.put('/:homeId/water-bottle-price', auth, async (req, res) => {
   }
 });
 
+// PUT /admin/:homeId/water-bill-exclusions
+router.put('/:homeId/water-bill-exclusions', auth, async (req, res) => {
+  try {
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    const requestedIds = req.body.excludedUserIds;
+    if (!Array.isArray(requestedIds)) {
+      return res.status(400).json({ message: 'excludedUserIds must be an array' });
+    }
+
+    const memberIds = new Set(home.members.map(member => member.user.toString()));
+    const normalizedIds = [...new Set(requestedIds.map(id => String(id)))];
+    if (normalizedIds.some(id => !memberIds.has(id))) {
+      return res.status(400).json({ message: 'Water bill exclusions must only include current home members' });
+    }
+
+    home.waterBillExcludedUsers = normalizedIds;
+    await home.save();
+    res.json({ excludedUserIds: normalizedIds });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────
 // MEMBERS
 // ─────────────────────────────────────────────────────────
@@ -275,6 +298,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
         eggs: 0,
         share: 0,
         equalShare: 0,
+        waterShare: 0,
       };
     });
 
@@ -293,6 +317,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
           eggs: 0,
           share: 0,
           equalShare: 0,
+          waterShare: 0,
         };
       }
 
@@ -301,13 +326,18 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     }
 
     const memberCount = Object.keys(memberMap).length;
-    const perMemberShare = memberCount > 0 ? equalSplitCost / memberCount : 0;
+    const excludedWaterUsers = new Set((fullHome.waterBillExcludedUsers || []).map(id => id.toString()));
+    const waterEligibleCount = Object.keys(memberMap).filter(uid => !excludedWaterUsers.has(uid)).length;
+    const sharedPerMember = memberCount > 0 ? shared / memberCount : 0;
+    const waterPerMember = waterEligibleCount > 0 ? water / waterEligibleCount : 0;
+    const perMemberShare = sharedPerMember + waterPerMember;
 
     Object.values(memberMap).forEach(member => {
       const mealCost = perMeal * member.meals;
       const eggCost = member.eggs * perEgg;
-      member.equalShare = perMemberShare;
-      member.share = mealCost + eggCost + perMemberShare;
+      member.waterShare = excludedWaterUsers.has(member.userId) ? 0 : waterPerMember;
+      member.equalShare = sharedPerMember + member.waterShare;
+      member.share = mealCost + eggCost + member.equalShare;
     });
 
     const breakdown = Object.values(memberMap);
@@ -326,6 +356,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
           eggs: entry?.eggs || 0,
           share: entry?.share || 0,
           equalShare: entry?.equalShare || 0,
+          waterShare: entry?.waterShare || 0,
         };
       });
 
@@ -336,6 +367,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
         name: recipient.name,
         meals: recipient.meals,
         eggs: recipient.eggs,
+        waterShare: recipient.waterShare,
         share: recipient.share,
       })),
     });

@@ -342,6 +342,7 @@ const sendBillEmail = async ({
   perMeal,
   userMeals,
   share,
+  waterShare = 0,
   breakdown,
   costSummary,
   pdfBuffer,
@@ -353,12 +354,14 @@ const sendBillEmail = async ({
     consumedCost = 0,
     remainingEggCost = 0,
     other = 0,
+    water = 0,
   } = costSummary || {};
 
   const rows = (breakdown || []).map(member => `
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#334155;">${escapeHtml(member.name)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#475569;">${Number(member.meals || 0)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;color:#475569;">${money(member.waterShare || 0)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#0f172a;">${money(member.share)}</td>
     </tr>`).join('');
 
@@ -366,7 +369,7 @@ const sendBillEmail = async ({
     from: sender,
     to,
     subject: `Your MealMate bill for ${month}: ${money(share)}`,
-    text: `Hi ${firstName}, your MealMate bill for ${month} is ${money(share)}. Your detailed PDF statement is attached.`,
+    text: `Hi ${firstName}, your MealMate bill for ${month} is ${money(share)}. Your water supply share is ${money(waterShare)}. Your detailed PDF statement is attached.`,
     html: `
       <div style="margin:0;background:#f1f5f9;padding:36px 12px;font-family:Arial,sans-serif;color:#0f172a;">
         <div style="max-width:620px;margin:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,.10);">
@@ -391,6 +394,8 @@ const sendBillEmail = async ({
               <tr><td style="padding:7px 0;color:#64748b;">Consumed egg cost</td><td style="text-align:right;font-weight:600;">${money(consumedCost)}</td></tr>
               <tr><td style="padding:7px 0;color:#64748b;">Remaining egg cost</td><td style="text-align:right;font-weight:600;">${money(remainingEggCost)}</td></tr>
               <tr><td style="padding:7px 0;color:#64748b;">Other cost</td><td style="text-align:right;font-weight:600;">${money(other)}</td></tr>
+              <tr><td style="padding:7px 0;color:#64748b;">Water supply (home total)</td><td style="text-align:right;font-weight:600;">${money(water)}</td></tr>
+              <tr><td style="padding:7px 0;color:#64748b;">Your water supply share</td><td style="text-align:right;font-weight:600;">${money(waterShare)}</td></tr>
               <tr><td style="padding:11px 0;border-top:2px solid #c7d2fe;font-weight:800;">Home total</td><td style="padding:11px 0;border-top:2px solid #c7d2fe;text-align:right;font-weight:800;color:#4f46e5;">${money(totalBill)}</td></tr>
             </table>
 
@@ -399,6 +404,7 @@ const sendBillEmail = async ({
               <thead><tr style="background:#f8fafc;">
                 <th style="padding:10px 12px;text-align:left;color:#64748b;">Member</th>
                 <th style="padding:10px 12px;text-align:center;color:#64748b;">Meals</th>
+                <th style="padding:10px 12px;text-align:right;color:#64748b;">Water share</th>
                 <th style="padding:10px 12px;text-align:right;color:#64748b;">Amount</th>
               </tr></thead>
               <tbody>${rows}</tbody>
