@@ -68,7 +68,7 @@ function generateBillPDF(data) {
     doc.fillColor(slate).font('Helvetica').fontSize(9)
       .text('YOUR USAGE', 334, amountY + 20, { width: 190, align: 'right' });
     doc.fillColor(navy).font('Helvetica-Bold').fontSize(14)
-      .text(`${Number(userMeals || 0)} meals | ${Number(userEggs || 0)} eggs`,
+      .text(`${Number(userMeals || 0).toFixed(2)} meals | ${Number(userEggs || 0)} eggs`,
         304, amountY + 39, { width: 220, align: 'right' });
     doc.fillColor(slate).font('Helvetica').fontSize(9)
       .text(`${money(perMeal)} per meal`, 304, amountY + 62, {
@@ -83,7 +83,7 @@ function generateBillPDF(data) {
     const cardWidth = (contentWidth - gap * 2) / 3;
     [
       ['Meal bill total', money(totalBill)],
-      ['Total meals', String(Number(totalMeals || 0))],
+      ['Total meals', Number(totalMeals || 0).toFixed(2)],
       ['Cost per meal', money(perMeal)],
     ].forEach(([label, value], index) => {
       const x = 46 + index * (cardWidth + gap);
@@ -147,7 +147,7 @@ function generateBillPDF(data) {
         .fillAndStroke(index % 2 === 0 ? white : soft, border);
       doc.fillColor(navy).font('Helvetica').fontSize(9);
       doc.text(member.name || 'Member', 58, tableY + 9, { width: 215 });
-      doc.text(String(Number(member.meals || 0)), 280, tableY + 9, {
+      doc.text(Number(member.meals || 0).toFixed(2), 280, tableY + 9, {
         width: 58,
         align: 'right',
       });

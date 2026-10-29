@@ -360,7 +360,7 @@ const sendBillEmail = async ({
   const rows = (breakdown || []).map(member => `
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#334155;">${escapeHtml(member.name)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#475569;">${Number(member.meals || 0)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#475569;">${Number(member.meals || 0).toFixed(2)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;color:#475569;">${money(member.waterShare || 0)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#0f172a;">${money(member.share)}</td>
     </tr>`).join('');
@@ -384,7 +384,7 @@ const sendBillEmail = async ({
             <div style="margin:24px 0;padding:22px;border-radius:16px;background:#eef2ff;border:1px solid #c7d2fe;">
               <div style="font-size:11px;font-weight:700;color:#6366f1;letter-spacing:1.4px;">YOUR AMOUNT DUE</div>
               <div style="font-size:34px;font-weight:800;color:#312e81;margin-top:7px;">${money(share)}</div>
-              <div style="font-size:13px;color:#64748b;margin-top:8px;">${Number(userMeals || 0)} meals at ${money(perMeal)} per meal</div>
+              <div style="font-size:13px;color:#64748b;margin-top:8px;">${Number(userMeals || 0).toFixed(2)} meals at ${money(perMeal)} per meal</div>
             </div>
 
             <h3 style="font-size:15px;margin:0 0 10px;color:#0f172a;">Cost summary</h3>
