@@ -87,15 +87,14 @@ async function calculateAndSendMonthlyBill(home, period, options = {}) {
     .filter(expense => expense.category === 'Egg')
     .reduce((sum, expense) => sum + (Number(expense.eggQty) || 0), 0);
   const otherCost = expenses
-    .filter(expense => expense.category !== 'Egg' && !expense.splitEqually)
+    .filter(expense => expense.category !== 'Egg' && expense.category !== 'WaterSupply' && !expense.splitEqually)
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
   const waterCost = expenses
-    .filter(expense => expense.category === 'WaterSupply' && expense.splitEqually)
+    .filter(expense => expense.category === 'WaterSupply')
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
-  const sharedCost = expenses
-    .filter(expense => expense.splitEqually)
+  const nonWaterSharedCost = expenses
+    .filter(expense => expense.splitEqually && expense.category !== 'WaterSupply')
     .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
-  const nonWaterSharedCost = Math.max(sharedCost - waterCost, 0);
 
   const totalMeals = meals.reduce((sum, meal) => sum + (Number(meal.mealCount) || 0), 0);
   const consumedEgg = meals.reduce((sum, meal) => sum + (Number(meal.eggsCount) || 0), 0);

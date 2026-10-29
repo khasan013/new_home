@@ -29,19 +29,34 @@ router.get('/:homeId', auth, async (req, res) => {
           $group: {
             _id: null,
             totalExpense: { $sum: '$amount' },
+            waterSupplyExpense: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$category', 'WaterSupply'] },
+                  '$amount',
+                  0
+                ]
+              }
+            },
             mealBasedExpense: {
               $sum: {
                 $cond: [
-                  { $eq: ['$splitEqually', true] },
+                  { $and: [
+                    { $eq: ['$splitEqually', true] },
+                    { $ne: ['$category', 'WaterSupply'] }
+                  ] },
                   0,
-                  '$amount'
+                  { $cond: [{ $eq: ['$category', 'WaterSupply'] }, 0, '$amount'] }
                 ]
               }
             },
             sharedExpense: {
               $sum: {
                 $cond: [
-                  { $eq: ['$splitEqually', true] },
+                  { $and: [
+                    { $eq: ['$splitEqually', true] },
+                    { $ne: ['$category', 'WaterSupply'] }
+                  ] },
                   '$amount',
                   0
                 ]
@@ -52,14 +67,16 @@ router.get('/:homeId', auth, async (req, res) => {
       ])
     ]);
 
-    const totalExpense = expenseTotals[0]?.totalExpense || 0;
+    const grossExpense = expenseTotals[0]?.totalExpense || 0;
+    const waterSupplyExpense = expenseTotals[0]?.waterSupplyExpense || 0;
+    const totalExpense = Math.max(grossExpense - waterSupplyExpense, 0);
     const mealBasedExpense = expenseTotals[0]?.mealBasedExpense || 0;
     const sharedExpense = expenseTotals[0]?.sharedExpense || 0;
     const totalMeals   = mealTotals[0]?.totalMeals || 0;
     const totalEggsConsumed = mealTotals[0]?.totalEggsConsumed || 0;
     const perMeal      = totalMeals ? mealBasedExpense / totalMeals : 0;
 
-    res.json({ totalExpense, mealBasedExpense, sharedExpense, totalMeals, perMeal, totalEggsConsumed });
+    res.json({ totalExpense, waterSupplyExpense, mealBasedExpense, sharedExpense, totalMeals, perMeal, totalEggsConsumed });
   } catch (err) {
     res.status(err.status || 500).json({ message: err.message || 'Failed to generate report' });
   }
