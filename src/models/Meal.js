@@ -32,6 +32,13 @@ const mealSchema = new mongoose.Schema({
     min: 0
   },
 
+  // Weighted item inputs used to produce mealCount. Kept for audit/history;
+  // mealCount remains the canonical value consumed by reports and billing.
+  mealSections: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
+
   // 🔥 Penalty support
   isPenalty: {
     type: Boolean,

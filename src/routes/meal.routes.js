@@ -55,7 +55,39 @@ router.post('/:homeId', auth, async (req, res) => {
     // 🔥 IMPORTANT FIX (normalize date to match unique index)
     date.setHours(0, 0, 0, 0);
 
-    // 🔥 FIX: use UPSERT instead of create (prevents duplicate error)
+    const roundMealCount = value => Math.round((value + Number.EPSILON) * 100) / 100;
+    let mealCount = parseNonNegativeNumber(req.body.mealCount, 'Meal count');
+    let eggsCount = parseNonNegativeNumber(req.body.eggsCount, 'Egg count');
+    let mealSections = null;
+
+    // Recalculate weighted meals on the server so dashboard, bill, and reports
+    // all receive the same two-decimal total. Extra eggs remain an egg count.
+    if (req.body.mealSections && typeof req.body.mealSections === 'object') {
+      const { quantities = {}, percentages = {} } = req.body.mealSections;
+      const sectionNames = ['meat', 'vegetables', 'egg', 'rice', 'vat'];
+      const sections = {};
+      let computedMealCount = 0;
+
+      for (const name of sectionNames) {
+        const quantity = parseNonNegativeNumber(quantities[name], `${name} quantity`);
+        const percent = parseNonNegativeNumber(percentages[name], `${name} percentage`);
+        if (percent > 100) {
+          return res.status(400).json({ message: `${name} percentage cannot exceed 100` });
+        }
+        // Rice is selected as a meal fraction directly (e.g. 0.15 = 0.15 meal).
+        // Other sections convert their selected item count by their meal share.
+        const rawContribution = name === 'rice' ? quantity : quantity * percent / 100;
+        const contribution = Math.round((rawContribution + Number.EPSILON) * 100) / 100;
+        sections[name] = { quantity, percent, contribution };
+        computedMealCount += contribution;
+      }
+
+      mealCount = roundMealCount(computedMealCount);
+      eggsCount += sections.egg.quantity;
+      mealSections = sections;
+    }
+
+    // UPSERT so multiple additions on the same day keep the existing daily record.
     const meal = await Meal.findOneAndUpdate(
       {
         homeId,
@@ -64,9 +96,10 @@ router.post('/:homeId', auth, async (req, res) => {
       },
       {
         $inc: {
-  mealCount: parseNonNegativeNumber(req.body.mealCount, 'Meal count'),
-  eggsCount: parseNonNegativeNumber(req.body.eggsCount, 'Egg count'),
-}
+          mealCount,
+          eggsCount,
+        },
+        ...(mealSections ? { $set: { mealSections } } : {}),
       },
       {
         new: true,
