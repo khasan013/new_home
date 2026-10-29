@@ -74,9 +74,11 @@ router.post('/:homeId', auth, async (req, res) => {
         if (percent > 100) {
           return res.status(400).json({ message: `${name} percentage cannot exceed 100` });
         }
-        // Rice is selected as a meal fraction directly (e.g. 0.15 = 0.15 meal).
-        // Other sections convert their selected item count by their meal share.
-        const rawContribution = name === 'rice' ? quantity : quantity * percent / 100;
+        // Rice portions and custom vat are direct meal inputs; other sections
+        // convert their selected item count by their configured meal share.
+        const rawContribution = name === 'rice' || name === 'vat'
+          ? quantity
+          : quantity * percent / 100;
         const contribution = Math.round((rawContribution + Number.EPSILON) * 100) / 100;
         sections[name] = { quantity, percent, contribution };
         computedMealCount += contribution;
