@@ -96,6 +96,10 @@ const billSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  deliveryErrors: [{
+    email: { type: String, default: null },
+    reason: { type: String, required: true },
+  }],
   deliveryStatus: {
     type: String,
     enum: ['queued', 'sending', 'sent', 'partial', 'failed'],

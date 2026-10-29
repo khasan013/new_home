@@ -350,7 +350,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
         month,
       });
 
-      const { sent, failed } = await deliverBillEmails({
+      const { sent, failed, failures } = await deliverBillEmails({
         recipients,
         homeName: fullHome.name,
         month,
@@ -376,6 +376,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       await Bill.findByIdAndUpdate(bill._id, {
         sentCount: sent,
         failedCount: failed,
+        deliveryErrors: failures,
         deliveryStatus,
         deliveryCompletedAt: new Date(),
       });
@@ -394,6 +395,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
 
       await Bill.findByIdAndUpdate(bill._id, {
         failedCount: recipients.length,
+        deliveryErrors: [{ email: null, reason: deliveryError?.message || 'Bill delivery failed' }],
         deliveryStatus: 'failed',
         deliveryCompletedAt: new Date(),
       });
@@ -401,7 +403,9 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
     }
 
     const completedBill = await Bill.findById(bill._id).lean() || billForResponse;
-    const responseMessage = `Bill generated and delivered to ${completedBill.sentCount} member(s).`;
+    const responseMessage = completedBill.failedCount > 0
+      ? `Bill generated: ${completedBill.sentCount} sent, ${completedBill.failedCount} failed. Check delivery errors and email configuration.`
+      : `Bill generated and delivered to ${completedBill.sentCount} member(s).`;
 
     const responseBody = {
       message: responseMessage,
@@ -411,6 +415,7 @@ router.post('/:homeId/bill/send', auth, async (req, res) => {
       breakdown,
       sent: completedBill.sentCount,
       failed: completedBill.failedCount,
+      deliveryErrors: completedBill.deliveryErrors || [],
       deliveryStatus: completedBill.deliveryStatus,
     };
 

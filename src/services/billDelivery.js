@@ -115,9 +115,21 @@ async function deliverBillEmails({
         messageId: info?.messageId,
       });
 
+      const accepted = (info?.accepted || []).some(address =>
+        String(address).trim().toLowerCase() === recipient.email.toLowerCase()
+      );
+      const rejected = (info?.rejected || []).some(address =>
+        String(address).trim().toLowerCase() === recipient.email.toLowerCase()
+      );
+      if (rejected || !accepted) {
+        throw new Error(rejected
+          ? `Mail provider rejected ${recipient.email}`
+          : `Mail provider did not confirm acceptance for ${recipient.email}`);
+      }
+
       return { status: 'fulfilled', value: recipient.email };
     } catch (error) {
-      return { status: 'rejected', reason: error };
+      return { status: 'rejected', email: recipient.email, reason: error };
     }
   };
 
@@ -125,16 +137,24 @@ async function deliverBillEmails({
 
   const failures = results
     .filter(result => result.status === 'rejected')
-    .map(result => result.reason);
+    .map(result => ({
+      email: result.email,
+      reason: result.reason?.message || String(result.reason),
+    }));
 
-  failures.forEach(error => {
-    console.error('Bill email delivery failed:', error?.message || error);
-    console.error('Bill email delivery failed stack:', error?.stack || error);
+  failures.forEach(failure => {
+    console.error('Bill email delivery failed:', failure);
   });
+
+  const skipped = skippedRecipients.map(({ recipient, reason }) => ({
+    email: String(recipient?.email || '').trim() || null,
+    reason,
+  }));
 
   const summary = {
     sent: results.length - failures.length,
     failed: failures.length + skippedRecipients.length,
+    failures: [...failures, ...skipped],
   };
 
   console.log('Bill email delivery finished:', summary);
