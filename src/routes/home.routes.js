@@ -225,6 +225,39 @@ router.put('/:homeId', auth, async (req, res) => {
   }
 });
 
+// DELETE /api/home/:homeId/leave — leave the selected home as the current user
+router.delete('/:homeId/leave', auth, async (req, res) => {
+  try {
+    const home = await Home.findById(req.params.homeId);
+    if (!home) return res.status(404).json({ message: 'Home not found' });
+
+    const userId = String(req.user.userId);
+    const leavingMember = home.members.find(member => String(member.user) === userId);
+    if (!leavingMember) {
+      return res.status(404).json({ message: 'You are not a member of this home' });
+    }
+
+    if (home.members.length <= 1) {
+      return res.status(400).json({ message: 'You are the only member. Invite another member before leaving this home.' });
+    }
+
+    const remainingMembers = home.members.filter(member => String(member.user) !== userId);
+    const remainingAdmin = remainingMembers.find(member => member.role === 'admin');
+    if (leavingMember.role === 'admin' && !remainingAdmin) {
+      remainingMembers[0].role = 'admin';
+    }
+
+    home.members = remainingMembers;
+    home.waterBillExcludedUsers = (home.waterBillExcludedUsers || [])
+      .filter(excludedUserId => String(excludedUserId) !== userId);
+    await home.save();
+
+    res.json({ message: 'You left the home successfully' });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message || 'Failed to leave home' });
+  }
+});
+
 // DELETE /api/home/:homeId — delete home (admin only)
 router.delete('/:homeId', auth, async (req, res) => {
   try {
