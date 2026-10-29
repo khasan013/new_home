@@ -52,8 +52,8 @@ router.post('/:homeId', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
-    // 🔥 IMPORTANT FIX (normalize date to match unique index)
-    date.setHours(0, 0, 0, 0);
+    // Normalize in UTC so browser and server timezones cannot shift the day.
+    date.setUTCHours(0, 0, 0, 0);
 
     const roundMealCount = value => Math.round((value + Number.EPSILON) * 100) / 100;
     let mealCount = parseNonNegativeNumber(req.body.mealCount, 'Meal count');
@@ -191,7 +191,7 @@ router.put('/:homeId/:mealId', auth, async (req, res) => {
     }
 
     if (date) {
-      date.setHours(0, 0, 0, 0); // 🔥 keep consistency
+      date.setUTCHours(0, 0, 0, 0);
     }
 
     const updateData = {};

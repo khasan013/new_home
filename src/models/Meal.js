@@ -57,7 +57,7 @@ const mealSchema = new mongoose.Schema({
 function normalizeDate(next) {
   if (this.date) {
     const d = new Date(this.date);
-    d.setHours(0, 0, 0, 0);
+    d.setUTCHours(0, 0, 0, 0);
     this.date = d;
   }
   next();
@@ -73,7 +73,7 @@ mealSchema.pre('findOneAndUpdate', function () {
 
   if (update && update.date) {
     const d = new Date(update.date);
-    d.setHours(0, 0, 0, 0);
+    d.setUTCHours(0, 0, 0, 0);
     update.date = d;
   }
 });
