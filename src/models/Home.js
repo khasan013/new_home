@@ -13,6 +13,12 @@ const homeSchema = new mongoose.Schema({
     default: '',
   },
 
+  waterBottlePrice: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+
   members: [
     {
       user: {

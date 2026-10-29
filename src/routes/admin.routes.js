@@ -23,6 +23,33 @@ const requireAdmin = async (homeId, userId) => {
   return home;
 };
 
+// GET /admin/:homeId/water-bottle-price
+router.get('/:homeId/water-bottle-price', auth, async (req, res) => {
+  try {
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    res.json({ waterBottlePrice: home.waterBottlePrice || 0 });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+// PUT /admin/:homeId/water-bottle-price
+router.put('/:homeId/water-bottle-price', auth, async (req, res) => {
+  try {
+    const home = await requireAdmin(req.params.homeId, req.user.userId);
+    const price = Number(req.body.waterBottlePrice);
+    if (!Number.isFinite(price) || price < 0) {
+      return res.status(400).json({ message: 'Water bottle price must be a valid non-negative number' });
+    }
+
+    home.waterBottlePrice = price;
+    await home.save();
+    res.json({ waterBottlePrice: home.waterBottlePrice });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────
 // MEMBERS
 // ─────────────────────────────────────────────────────────

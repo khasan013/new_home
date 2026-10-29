@@ -43,8 +43,11 @@ function validatePayload(payload) {
 
 router.post('/:homeId', auth, async (req, res) => {
   try {
-    await requireHomeMember(req.params.homeId, req.user.userId);
-    const payload = cleanExpensePayload(req.body);
+    const { home } = await requireHomeMember(req.params.homeId, req.user.userId);
+    const payloadBody = req.body.category === 'WaterSupply'
+      ? { ...req.body, bottlePrice: home.waterBottlePrice || 0 }
+      : req.body;
+    const payload = cleanExpensePayload(payloadBody);
     const validationError = validatePayload(payload);
 
     if (validationError) {
@@ -96,8 +99,11 @@ router.get('/:homeId', auth, async (req, res) => {
 
 router.put('/:homeId/:expId', auth, async (req, res) => {
   try {
-    await requireHomeMember(req.params.homeId, req.user.userId);
-    const payload = cleanExpensePayload(req.body);
+    const { home } = await requireHomeMember(req.params.homeId, req.user.userId);
+    const payloadBody = req.body.category === 'WaterSupply'
+      ? { ...req.body, bottlePrice: home.waterBottlePrice || 0 }
+      : req.body;
+    const payload = cleanExpensePayload(payloadBody);
     const validationError = validatePayload(payload);
 
     if (validationError) {

@@ -3,7 +3,7 @@ const Home = require('../models/Home');
 async function getMembership(homeId, userId) {
   const home = await Home.findOne(
     { _id: homeId, 'members.user': userId },
-    { name: 1, members: { $elemMatch: { user: userId } } }
+    { name: 1, waterBottlePrice: 1, members: { $elemMatch: { user: userId } } }
   ).lean();
   if (!home) {
     throw Object.assign(new Error('Home access required'), { status: 403 });
